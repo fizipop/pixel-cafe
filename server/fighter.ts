@@ -78,7 +78,7 @@ export class FighterEngine {
     if (!bout || !Number.isInteger(bits)) return;
     const side = bout.e[0].w.sockId === sockId ? 0 : 1;
     const e = bout.e[side];
-    if (e) e.bits = (bits as number) & (BTN.LEFT | BTN.RIGHT | BTN.UP | BTN.BLOCK | BTN.LIGHT | BTN.HEAVY | BTN.SPECIAL);
+    if (e) e.bits = (bits as number) & (BTN.LEFT | BTN.RIGHT | BTN.UP | BTN.BLOCK | BTN.DOWN | BTN.LIGHT | BTN.HEAVY | BTN.SPECIAL);
   }
 
   /** Step every running match up to `now`, then send snapshots. */

@@ -222,6 +222,9 @@ export type PoolView = {
   winner: 0 | 1 | null;
   msg: string;
   returned: number | null; // beans you were paid when the match ended
+  inHand: boolean; // the player to shoot may place the cue ball first (after a foul)
+  kitchen: boolean; // ...behind the head string only (a scratch on the break)
+  targets: number[]; // ball ids that are legal to hit first this turn (just the 8 once a group is cleared)
 };
 
 // ---- Pixel Fighter II
@@ -295,14 +298,14 @@ export interface ClientToServer {
   "pk:bot": (p: { add: boolean }, ack: (r: Ack) => void) => void;
   "pl:start": (p: { stake: number; ai: boolean }, ack: (r: Ack) => void) => void;
   "pl:accept": (p: { accept: boolean }, ack: (r: Ack) => void) => void;
-  "pl:shot": (p: { angle: number; power: number }, ack: (r: Ack) => void) => void;
+  "pl:shot": (p: { angle: number; power: number; cue?: { x: number; y: number }; pocket?: number }, ack: (r: Ack) => void) => void;
   "pl:resign": (ack: (r: Ack) => void) => void;
   "fg:join": (p: { char: number; ladder: boolean }, ack: (r: Ack<{ view: FighterView }>) => void) => void;
   "fg:cancel": (ack: (r: Ack) => void) => void;
   "fg:input": (p: { bits: number }) => void;
   "racer:start": (ack: (r: Ack<RunStart>) => void) => void;
   "racer:finish": (p: { token: number; totalMs: number; bestLapMs: number; position: number }, ack: (r: Ack<RunFinish>) => void) => void;
-  "beat:start": (ack: (r: Ack<RunStart>) => void) => void;
+  "beat:start": (p: { diff?: string }, ack: (r: Ack<RunStart>) => void) => void;
   "beat:finish": (p: { token: number; seq: string }, ack: (r: Ack<RunFinish & { rankLetter: string; score: number; maxCombo: number }>) => void) => void;
   "arcade:board": (ack: (r: Ack<{ view: BoardView }>) => void) => void;
   // ---- Floor 3 rooftop (every one answers with an Ack)

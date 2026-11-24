@@ -41,6 +41,65 @@ export function buildChart(seed = 7): Note[] {
 }
 export const CHART: Note[] = buildChart();
 
+// ------------------------------------------------------------------ difficulty levels
+
+export type Difficulty = "easy" | "normal" | "hard" | "insane";
+export const DIFFICULTIES: Difficulty[] = ["easy", "normal", "hard", "insane"];
+export const isDifficulty = (d: unknown): d is Difficulty => typeof d === "string" && (DIFFICULTIES as string[]).includes(d);
+
+/** What a level changes: tempo, song length, how long an arrow takes to fall (scroll speed), the bean multiplier, and how busy the chart is. */
+export type Level = {
+  id: Difficulty; label: string; blurb: string; bpm: number; bars: number; lookahead: number; beanMult: number;
+  seed: number;
+  on: [number, number]; off: [number, number]; dbl: [number, number]; stream: [number, number]; // [start, extra by the last bar] chance per slot
+};
+export const LEVELS: Record<Difficulty, Level> = {
+  easy: { id: "easy", label: "Easy", blurb: "Slow 96 BPM, one arrow at a time, lots of time to read.", bpm: 96, bars: 24, lookahead: 2100, beanMult: 0.5, seed: 3, on: [0.78, 0.22], off: [0.04, 0.2], dbl: [0, 0], stream: [0, 0] },
+  normal: { id: "normal", label: "Normal", blurb: "128 BPM eighth-note runs that build as the song heats up.", bpm: BEAT.BPM, bars: BEAT.BARS, lookahead: BEAT.LOOKAHEAD_MS, beanMult: 1, seed: 7, on: [0.8, 0.2], off: [0.4, 0.5], dbl: [0, 0], stream: [0, 0] },
+  hard: { id: "hard", label: "Hard", blurb: "144 BPM, faster scroll, double arrows and short 16th-note streams.", bpm: 144, bars: 32, lookahead: 1400, beanMult: 1.5, seed: 11, on: [0.92, 0.08], off: [0.55, 0.4], dbl: [0.06, 0.14], stream: [0.08, 0.16] },
+  insane: { id: "insane", label: "Insane", blurb: "168 BPM, lightning scroll, constant doubles and long streams.", bpm: 168, bars: 36, lookahead: 1100, beanMult: 2, seed: 19, on: [0.97, 0.03], off: [0.72, 0.25], dbl: [0.15, 0.22], stream: [0.18, 0.25] },
+};
+export const levelOf = (d: Difficulty) => LEVELS[d];
+export const beatMsAt = (bpm: number) => 60000 / bpm;
+export const songMsFor = (d: Difficulty) => Math.round(LEVELS[d].bars * 4 * beatMsAt(LEVELS[d].bpm));
+
+const charts = new Map<Difficulty, Note[]>();
+/** The chart for a level. Normal is the original chart; the others are generated from their own fixed seeds (doubles share a timestamp). */
+export function chartFor(d: Difficulty): Note[] {
+  const hit = charts.get(d);
+  if (hit) return hit;
+  let notes: Note[];
+  if (d === "normal") notes = CHART;
+  else {
+    const L = LEVELS[d], rng = mulberry(L.seed), beat = beatMsAt(L.bpm);
+    notes = [];
+    let lane = 1, skip = false;
+    const pick = (avoid: number[]) => { let n = Math.floor(rng() * 4); if (avoid.includes(n)) n = (n + 1 + Math.floor(rng() * 3)) % 4; if (avoid.includes(n)) n = [0, 1, 2, 3].find((k) => !avoid.includes(k))!; return n; };
+    for (let bar = BEAT.FIRST_BAR; bar < L.bars - 1; bar++) {
+      const heat = (bar - BEAT.FIRST_BAR) / (L.bars - BEAT.FIRST_BAR);
+      for (let step = 0; step < 8; step++) {
+        if (skip) { skip = false; continue; } // a stream already used this slot
+        const onBeat = step % 2 === 0;
+        const [a, b] = onBeat ? L.on : L.off;
+        if (rng() > a + heat * b) continue;
+        const t0 = (bar * 4 + step / 2) * beat;
+        lane = pick(rng() < 0.55 ? [lane] : []);
+        notes.push({ t: Math.round(t0), lane: lane as Note["lane"] });
+        if (onBeat && rng() < L.dbl[0] + heat * L.dbl[1]) notes.push({ t: Math.round(t0), lane: pick([lane]) as Note["lane"] }); // a double: two arrows together
+        else if (onBeat && step < 6 && rng() < L.stream[0] + heat * L.stream[1]) { // a stream: four 16ths walking across the lanes
+          const dir = rng() < 0.5 ? 1 : 3;
+          for (let k = 1; k <= 3; k++) { lane = (lane + dir) % 4; notes.push({ t: Math.round(t0 + (beat / 4) * k), lane: lane as Note["lane"] }); }
+          skip = true;
+        }
+      }
+      skip = false;
+    }
+  }
+  charts.set(d, notes);
+  return notes;
+}
+export const beansFor = (letter: Rank, d: Difficulty) => Math.round(RANK_BEANS[letter] * LEVELS[d].beanMult);
+
 export type Judge = "S" | "G" | "M"; // Sick! / Good / Miss
 /** Judge a press `deltaMs` away from the note (negative = early). */
 export const judge = (deltaMs: number): Judge => (Math.abs(deltaMs) <= BEAT.SICK_MS ? "S" : Math.abs(deltaMs) <= BEAT.GOOD_MS ? "G" : "M");

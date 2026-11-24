@@ -153,14 +153,14 @@ export class Arcade {
       case "pk:bot": return seat?.table === "pk0" ? this.poker.bot(x.add !== false) : fail("Sit at the poker table first.");
       case "pl:start": return seat?.table === "pl0" ? this.pool.start(w, x.stake, x.ai) : fail("Sit at the pool table first.");
       case "pl:accept": return seat?.table === "pl0" ? this.pool.accept(w, x.accept) : fail("Sit at the pool table first.");
-      case "pl:shot": return seat?.table === "pl0" ? this.pool.shoot(w, x.angle, x.power) : fail("Sit at the pool table first.");
+      case "pl:shot": return seat?.table === "pl0" ? this.pool.shoot(w, x.angle, x.power, x.cue, x.pocket) : fail("Sit at the pool table first.");
       case "pl:resign": return seat?.table === "pl0" ? this.pool.resign(w) : fail("Sit at the pool table first.");
       case "fg:join": { const r = this.fighter.join(w, x.char, x.ladder); return r; }
       case "fg:cancel": this.fighter.leave(sockId); this.host.emitTo(sockId, "fg:state", this.fighter.view(sockId)); return { ok: true };
       case "fg:input": this.fighter.input(sockId, x.bits); return { ok: true };
       case "racer:start": return this.solo.runStart("racer", w);
       case "racer:finish": return this.solo.racerFinish(w, x.token, x.totalMs, x.bestLapMs, x.position);
-      case "beat:start": return this.solo.runStart("beat", w);
+      case "beat:start": return this.solo.runStart("beat", w, x.diff);
       case "beat:finish": return this.solo.beatFinish(w, x.token, x.seq);
       case "arcade:board": return { ok: true, view: this.board(w.clientId) };
       default: return fail("Unknown request.");

@@ -1,17 +1,14 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import {
-  BEAT, CHART, LANES, LANE_KEYS, LANE_NOTES, RANK_BEANS, SONG_MS, beatMs, judge, newScore, rankOf, scoreRun, scoreStep, trackStep, comboMult,
-  type Judge, type Rank, type Score,
+  BEAT, DIFFICULTIES, LANES, LANE_KEYS, LANE_NOTES, LEVELS, beansFor, beatMsAt, chartFor, comboMult, judge, newScore, rankOf, scoreRun, scoreStep, songMsFor, trackStep,
+  type Difficulty, type Judge, type Level, type Rank, type Score,
 } from "@/shared/beat";
 import type { RunFinish, RunStart } from "@/shared/protocol";
+import { BH, BW, BeatView, LANE_COLORS } from "@/game/beatArt";
 import { ArcadeFrame, type ArcadeProps } from "./ui";
 
-const W = 480;
-const H = 360;
-const LANE_X = [120, 180, 240, 300];
-const HIT_Y = 300;
-const COLORS = ["#ff5fa8", "#58e1ff", "#7fe0a9", "#f2c36b"];
+const COLORS = LANE_COLORS;
 const LEAD_IN_S = 1.6;
 const PRESS_WINDOW_MS = 190;
 const AUDIO_KEY = "pixelcafe.audio.v1";
@@ -29,9 +26,12 @@ class Song {
   private noise: AudioBuffer;
   private timer: number;
   private step = 0;
-  private stepS = beatMs() / 4000;
+  private stepS: number;
+  private steps: number;
 
-  constructor() {
+  constructor(level: Level) {
+    this.stepS = beatMsAt(level.bpm) / 4000;
+    this.steps = level.bars * 16;
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     this.ctx = new AC();
     const { volume, muted } = readAudioPrefs();
@@ -44,7 +44,7 @@ class Song {
     for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     this.startAt = this.ctx.currentTime + LEAD_IN_S;
     this.timer = window.setInterval(() => {
-      while (this.startAt + this.step * this.stepS < this.ctx.currentTime + 0.25 && this.step < BEAT.BARS * 16) this.schedule(this.step++);
+      while (this.startAt + this.step * this.stepS < this.ctx.currentTime + 0.25 && this.step < this.steps) this.schedule(this.step++);
     }, 25);
   }
 
@@ -83,23 +83,15 @@ class Song {
   stop() { window.clearInterval(this.timer); this.ctx.close().catch(() => {}); }
 }
 
-function arrow(c: CanvasRenderingContext2D, x: number, y: number, lane: number, fill: string, size = 22) {
-  // the shape points right by default; rotate so lane 0 faces left, 1 down, 2 up, 3 right
-  c.save(); c.translate(x, y); c.rotate([Math.PI, Math.PI / 2, -Math.PI / 2, 0][lane]);
-  c.fillStyle = "#05030c"; c.beginPath(); c.moveTo(size, 0); c.lineTo(-size * 0.2, -size); c.lineTo(-size * 0.2, -size * 0.45); c.lineTo(-size, -size * 0.45); c.lineTo(-size, size * 0.45); c.lineTo(-size * 0.2, size * 0.45); c.lineTo(-size * 0.2, size); c.closePath(); c.fill();
-  c.fillStyle = fill; const s = size - 4; c.beginPath(); c.moveTo(s, 0); c.lineTo(-s * 0.2, -s); c.lineTo(-s * 0.2, -s * 0.45); c.lineTo(-s, -s * 0.45); c.lineTo(-s, s * 0.45); c.lineTo(-s * 0.2, s * 0.45); c.lineTo(-s * 0.2, s); c.closePath(); c.fill();
-  c.restore();
-}
-
-type Pop = { text: string; col: string; t: number };
-
-/** Beat Battle: four falling arrows, D F J K (or the arrow keys) to hit them on the line, and a tug-of-war with a rival DJ. */
+/** Beat Battle: four falling arrows, D F J K (or the arrow keys) to hit them on the line, and a tug-of-war with a rival DJ. Pick Easy, Normal, Hard or Insane first. */
 export default function Beat({ net, onClose, sfx }: ArcadeProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const song = useRef<Song | null>(null);
   const token = useRef(0);
   const [phase, setPhase] = useState<"menu" | "play" | "done">("menu");
-  const [final, setFinal] = useState<{ score: Score; rank: Rank; fin?: RunFinish & { rankLetter: string }; err?: string; failed?: boolean } | null>(null);
+  const [diff, setDiff] = useState<Difficulty>("normal");
+  const played = useRef<Difficulty>("normal");
+  const [final, setFinal] = useState<{ score: Score; rank: Rank; diff: Difficulty; fin?: RunFinish & { rankLetter: string }; err?: string; failed?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const press = useRef<(lane: number) => void>(() => {});
   const sfxRef = useRef(sfx);
@@ -108,12 +100,13 @@ export default function Beat({ net, onClose, sfx }: ArcadeProps) {
   const start = async () => {
     if (busy) return;
     setBusy(true);
-    const r = await net.call<RunStart>("beat:start");
+    const r = await net.call<RunStart>("beat:start", { diff });
     setBusy(false);
-    if (!r.ok) { setFinal({ score: newScore(), rank: "D", err: r.reason }); return; }
+    if (!r.ok) { setFinal({ score: newScore(), rank: "D", diff, err: r.reason }); return; }
+    played.current = diff;
     token.current = r.token;
     song.current?.stop();
-    song.current = new Song(); // created in the click, so the browser lets it play
+    song.current = new Song(LEVELS[diff]); // created in the click, so the browser lets it play
     setFinal(null);
     setPhase("play");
   };
@@ -123,22 +116,23 @@ export default function Beat({ net, onClose, sfx }: ArcadeProps) {
   useEffect(() => {
     if (phase !== "play" || !song.current) return;
     const sg = song.current;
-    const letters: (Judge | null)[] = CHART.map(() => null);
+    const level = LEVELS[played.current];
+    const chart = chartFor(played.current);
+    const view = new BeatView();
+    const letters: (Judge | null)[] = chart.map(() => null);
     let live = newScore();
     let lastResolved = -1;
     let combo = 0;
-    const pops: Pop[] = [];
     const flash = [0, 0, 0, 0];
     let finished = false;
 
     const resolve = (i: number, j: Judge) => {
       letters[i] = j;
-      const gap = i === 0 ? CHART[0].t : CHART[i].t - CHART[i - 1].t;
+      const gap = i === 0 ? chart[0].t : chart[i].t - chart[i - 1].t;
       live = scoreStep(live, j, gap);
       lastResolved = Math.max(lastResolved, i);
       combo = live.combo;
-      pops.push({ text: j === "S" ? "SICK!" : j === "G" ? "GOOD" : "MISS", col: j === "S" ? "#58e1ff" : j === "G" ? "#7fe0a9" : "#d9304a", t: 0 });
-      if (pops.length > 3) pops.shift();
+      if (j === "M") view.onMiss();
     };
 
     press.current = (lane) => {
@@ -146,16 +140,16 @@ export default function Beat({ net, onClose, sfx }: ArcadeProps) {
       flash[lane] = 1;
       const t = sg.now();
       let best = -1, bd = Infinity;
-      for (let i = 0; i < CHART.length; i++) {
-        if (letters[i] !== null || CHART[i].lane !== lane) continue;
-        const d = Math.abs(CHART[i].t - t);
-        if (CHART[i].t - t > PRESS_WINDOW_MS) break; // later notes are even further away
+      for (let i = 0; i < chart.length; i++) {
+        if (letters[i] !== null || chart[i].lane !== lane) continue;
+        const d = Math.abs(chart[i].t - t);
+        if (chart[i].t - t > PRESS_WINDOW_MS) break; // later notes are even further away
         if (d < bd) { bd = d; best = i; }
       }
       if (best < 0 || bd > PRESS_WINDOW_MS) return; // a tap with nothing near it does nothing
-      const j = judge(t - CHART[best].t);
+      const j = judge(t - chart[best].t);
       resolve(best, j);
-      if (j === "M") sg.miss(); else sg.blip(lane, j);
+      if (j === "M") sg.miss(); else { sg.blip(lane, j); view.onHit(lane, j); }
     };
 
     const keyLane = (code: string) => LANE_KEYS.findIndex((k) => k.includes(code));
@@ -165,11 +159,12 @@ export default function Beat({ net, onClose, sfx }: ArcadeProps) {
     const finish = async () => {
       finished = true;
       const seq = letters.map((l) => l ?? "M").join("");
-      const score = scoreRun(seq) ?? live;
-      const rank = rankOf(score);
-      if (score.failed) { setFinal({ score, rank, failed: true }); setPhase("done"); sfxRef.current("lose"); return; }
+      const score = scoreRun(seq, chart) ?? live;
+      const rank = rankOf(score, chart.length);
+      const dd = played.current;
+      if (score.failed) { setFinal({ score, rank, diff: dd, failed: true }); setPhase("done"); sfxRef.current("lose"); return; }
       const r = await net.call<RunFinish & { rankLetter: string }>("beat:finish", { token: token.current, seq });
-      setFinal(r.ok ? { score, rank, fin: r } : { score, rank, err: r.reason });
+      setFinal(r.ok ? { score, rank, diff: dd, fin: r } : { score, rank, diff: dd, err: r.reason });
       if (r.ok && r.beans > 0) sfxRef.current("cashout");
       setPhase("done");
     };
@@ -178,48 +173,15 @@ export default function Beat({ net, onClose, sfx }: ArcadeProps) {
     const loop = () => {
       const t = sg.now();
       const c = canvas.current?.getContext("2d");
-      for (let i = Math.max(0, lastResolved - 4); i < CHART.length; i++) {
-        if (letters[i] === null && CHART[i].t + BEAT.GOOD_MS < t) resolve(i, "M");
-        if (CHART[i].t > t) break;
+      for (let i = Math.max(0, lastResolved - 4); i < chart.length; i++) {
+        if (letters[i] === null && chart[i].t + BEAT.GOOD_MS < t) resolve(i, "M");
+        if (chart[i].t > t) break;
       }
       if (c) {
-        c.clearRect(0, 0, W, H);
-        const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#14082a"); g.addColorStop(1, "#2a1050"); c.fillStyle = g; c.fillRect(0, 0, W, H);
-        const beatPhase = ((t / beatMs()) % 1 + 1) % 1;
-        for (let i = 0; i < 4; i++) { c.fillStyle = `${COLORS[i]}${beatPhase < 0.2 ? "22" : "10"}`; c.fillRect(LANE_X[i] - 28, 0, 56, H); }
-        c.fillStyle = "#fff6e044"; c.fillRect(LANE_X[0] - 30, HIT_Y + 2, LANE_X[3] - LANE_X[0] + 60, 2);
-        for (let i = 0; i < 4; i++) { flash[i] = Math.max(0, flash[i] - 0.08); arrow(c, LANE_X[i], HIT_Y, i, flash[i] > 0 ? "#fff6e0" : "#3a2a5a"); }
-        const speed = (HIT_Y + 30) / BEAT.LOOKAHEAD_MS;
-        for (let i = 0; i < CHART.length; i++) {
-          const n = CHART[i];
-          const y = HIT_Y - (n.t - t) * speed;
-          if (y < -40) break;
-          if (letters[i] !== null || y > H + 30) continue;
-          arrow(c, LANE_X[n.lane], y, n.lane, COLORS[n.lane]);
-        }
-        // the rival DJ bobs to the beat; he grows bolder as he wins the tug-of-war
-        const bob = Math.round(Math.sin(t / beatMs() * Math.PI * 2) * 3);
-        const winning = live.hype < 35;
-        c.fillStyle = "#05030c"; c.fillRect(372, 70 + bob, 60, 70);
-        c.fillStyle = "#ff5fa8"; c.fillRect(376, 100 + bob, 52, 40); // body
-        c.fillStyle = "#f1c27d"; c.fillRect(386, 76 + bob, 32, 26); // head
-        c.fillStyle = "#05030c"; c.fillRect(384, 84 + bob, 36, 7); c.fillStyle = winning ? "#ff303a" : "#58e1ff"; c.fillRect(388, 86 + bob, 10, 3); c.fillRect(406, 86 + bob, 10, 3); // shades
-        c.fillStyle = "#7fe0a9"; c.fillRect(382, 68 + bob, 40, 6); c.fillRect(380, 74 + bob, 6, 18); c.fillRect(418, 74 + bob, 6, 18); // headphones
-        c.fillStyle = "#05030c"; c.fillRect(366, 140, 72, 10); c.fillStyle = "#58e1ff"; c.fillRect(372, 143, 24, 4); c.fillStyle = "#f2c36b"; c.fillRect(408, 143, 24, 4);
-        // hype bar: you pull it right, the rival pulls it left
-        c.fillStyle = "#05030c"; c.fillRect(18, 28, 14, 240);
-        c.fillStyle = "#ff5fa8"; c.fillRect(20, 30, 10, 236);
-        const h = Math.round((236 * live.hype) / 100);
-        c.fillStyle = "#58e1ff"; c.fillRect(20, 30 + 236 - h, 10, h);
-        c.font = "16px VT323, monospace"; c.textAlign = "left"; c.fillStyle = "#58e1ff"; c.fillText("YOU", 14, 288); c.fillStyle = "#ff5fa8"; c.fillText("DJ", 16, 22);
-        c.textAlign = "center"; c.font = "22px VT323, monospace"; c.fillStyle = "#fff6e0";
-        c.fillText(live.score.toLocaleString(), W / 2, 24);
-        c.font = "16px VT323, monospace"; c.fillStyle = "#f2c36b"; c.fillText(combo > 1 ? `${combo} COMBO ×${comboMult(combo)}` : "", W / 2, 44);
-        for (const p of pops) { p.t++; c.globalAlpha = Math.max(0, 1 - p.t / 40); c.font = "28px VT323, monospace"; c.fillStyle = p.col; c.fillText(p.text, W / 2, HIT_Y - 50 - p.t / 3); c.globalAlpha = 1; }
-        if (t < 0) { c.font = "30px VT323, monospace"; c.fillStyle = "#fff6e0"; c.fillText("GET READY", W / 2, 160); }
-        if (t > 0 && t < 1500) { c.font = "20px VT323, monospace"; c.fillStyle = "#fff6e0aa"; c.fillText(CHART.length + " arrows · D F J K or ← ↓ ↑ →", W / 2, 340); }
+        for (let i = 0; i < 4; i++) flash[i] = Math.max(0, flash[i] - 0.08);
+        view.draw(c, { t, level, chart, letters, flash, hype: live.hype, score: live.score, combo, comboMult: comboMult(combo), sick: live.sick, good: live.good, miss: live.miss, maxCombo: live.maxCombo, total: chart.length, names: ["You", "Rival DJ"] });
       }
-      if (!finished && (live.failed || t > CHART[CHART.length - 1].t + 800 || t > SONG_MS + 2000)) void finish();
+      if (!finished && (live.failed || t > chart[chart.length - 1].t + 800 || t > songMsFor(played.current) + 2000)) void finish();
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
@@ -230,15 +192,18 @@ export default function Beat({ net, onClose, sfx }: ArcadeProps) {
     if (phase === "done") { song.current?.stop(); song.current = null; }
   }, [phase]);
 
+  const chipCol: Record<Difficulty, string> = { easy: "#7fe0a9", normal: "#58e1ff", hard: "#f2a93b", insane: "#ff5fa8" };
   return (
-    <ArcadeFrame title="Beat Battle" net={net} onClose={onClose} width="max-w-3xl" accent="text-[#ff5fa8]">
+    <ArcadeFrame title="Beat Battle" net={net} onClose={onClose} width="max-w-4xl" accent="text-[#ff5fa8]">
       {phase !== "menu" && (
         <>
-          <canvas ref={canvas} width={W} height={H} className="mx-auto block w-full max-w-xl border-4 border-bark bg-espresso" style={{ aspectRatio: `${W}/${H}`, touchAction: "none" }} aria-label="Falling arrows" />
+          <canvas ref={canvas} width={BW} height={BH} className="mx-auto block w-full max-w-2xl border-4 border-bark bg-espresso" style={{ aspectRatio: `${BW}/${BH}`, touchAction: "none", imageRendering: "pixelated" }} aria-label="Falling arrows" />
           {phase === "play" && (
-            <div className="mx-auto mt-2 grid max-w-xl grid-cols-4 gap-2" role="group" aria-label="Arrow buttons">
+            <div className="mx-auto mt-2 grid max-w-2xl grid-cols-4 gap-2" role="group" aria-label="Arrow buttons">
               {LANES.map((a, i) => (
-                <button key={i} className="px-btn !py-3 !text-2xl" style={{ background: COLORS[i] }} onPointerDown={(e) => { e.preventDefault(); press.current(i); }} aria-label={`Lane ${i + 1}`}>{a}</button>
+                <button key={i} className="px-btn !py-3 !text-2xl" style={{ background: COLORS[i] }} onPointerDown={(e) => { e.preventDefault(); press.current(i); }} aria-label={`Lane ${i + 1}`}>
+                  {a}<span className="ml-2 text-sm opacity-70">{["D", "F", "J", "K"][i]}</span>
+                </button>
               ))}
             </div>
           )}
@@ -247,6 +212,7 @@ export default function Beat({ net, onClose, sfx }: ArcadeProps) {
       {phase === "done" && final && (
         <div className="mt-3 text-center" role="status">
           <p className="font-pixel text-5xl text-amber">{final.rank}</p>
+          <p className="text-lg" style={{ color: chipCol[final.diff] }}>{LEVELS[final.diff].label} · {LEVELS[final.diff].bpm} BPM</p>
           <p className="text-xl text-cream">{final.score.score.toLocaleString()} points · max combo {final.score.maxCombo} · Sick {final.score.sick} · Good {final.score.good} · Miss {final.score.miss}</p>
           {final.failed && <p className="text-ember">The rival DJ drowned you out. Hit more arrows to keep the hype bar on your side!</p>}
           {final.fin && <p className="text-mint">{final.fin.beans > 0 ? `+${final.fin.beans} Cafe Beans` : "No beans this time"}{final.fin.best ? " · NEW high score!" : ""}{final.fin.rank ? ` · board rank #${final.fin.rank}` : ""}</p>}
@@ -255,10 +221,22 @@ export default function Beat({ net, onClose, sfx }: ArcadeProps) {
       )}
       {phase !== "play" && (
         <div className="mt-3 text-center">
-          {phase === "menu" && <p className="mb-3 text-xl text-cream">Hit the falling arrows in time with the track and out-hype the rival DJ. Rank S pays {RANK_BEANS.S} beans, A {RANK_BEANS.A}, B {RANK_BEANS.B}, C {RANK_BEANS.C}. High scores go on the leaderboard.</p>}
+          {phase === "menu" && <p className="mb-3 text-xl text-cream">Hit the falling arrows in time with the track and out-hype the rival DJ. Pick a difficulty, then start the song.</p>}
           {phase === "menu" && final?.err && <p className="mb-2 text-ember" role="alert">{final.err}</p>}
-          <button className="px-btn !px-6 !py-3" disabled={busy} onClick={() => void start()}>{phase === "done" ? "Play again" : "Start the song"}</button>
-          <p className="mt-3 text-sm text-latte">Free to play. Keys: D F J K or the arrow keys (or tap the buttons). Sick! is within 45 ms, Good within 110 ms. Combos raise your multiplier up to ×4.</p>
+          <div className="mx-auto mb-3 grid max-w-3xl gap-2 sm:grid-cols-4" role="radiogroup" aria-label="Difficulty">
+            {DIFFICULTIES.map((d) => {
+              const L = LEVELS[d];
+              return (
+                <button key={d} role="radio" aria-checked={diff === d} className={`px-btn !text-left ${diff === d ? "active" : "secondary"}`} onClick={() => setDiff(d)} style={diff === d ? { outline: `3px solid ${chipCol[d]}` } : undefined}>
+                  <b style={{ color: chipCol[d] }}>{L.label}</b>
+                  <span className="mt-1 block text-sm opacity-90">{L.blurb}</span>
+                  <span className="mt-1 block text-xs opacity-80">{L.bpm} BPM · {chartFor(d).length} arrows · beans ×{L.beanMult}</span>
+                </button>
+              );
+            })}
+          </div>
+          <button className="px-btn !px-6 !py-3" disabled={busy} onClick={() => void start()}>{phase === "done" ? `Play again (${LEVELS[diff].label})` : `Start the song (${LEVELS[diff].label})`}</button>
+          <p className="mt-3 text-sm text-latte">Free to play. Keys: D F J K or the arrow keys (or tap the buttons). Sick! is within 45 ms, Good within 110 ms, otherwise it is a Miss. Combos raise your multiplier up to ×4. On {LEVELS[diff].label}, rank S pays {beansFor("S", diff)} beans (A {beansFor("A", diff)}, B {beansFor("B", diff)}, C {beansFor("C", diff)}); harder levels pay more. High scores go on the leaderboard.</p>
         </div>
       )}
     </ArcadeFrame>

@@ -1,7 +1,7 @@
 // The 8-Ball Pool table on Floor 2: two stools, a match against the house bot or the other person sitting
 // down, and an optional friendly stake in Cafe Beans. The server runs every shot with the shared physics
 // (src/shared/pool.ts); the browser replays the same shot to animate it.
-import { chooseShot, newPoolGame, playShot, type PoolGame } from "../src/shared/pool.ts";
+import { chooseShot, legalTargets, needsCall, newPoolGame, placeCue, placeProblem, playShot, type PoolGame } from "../src/shared/pool.ts";
 import type { PoolBallView, PoolView } from "../src/shared/protocol.ts";
 import { fail, type EngineCtx, type Fail, type Who } from "./arcadeTypes.ts";
 
@@ -125,9 +125,10 @@ export class PoolEngine {
 
   // ------------------------------------------------------------ shots
 
-  shootNow(side: 0 | 1, angle: number, power: number) {
+  shootNow(side: 0 | 1, angle: number, power: number, cue?: { x: number; y: number }, pocket?: number) {
+    if (cue) this.game = placeCue(this.game, cue); // ball in hand: the cue ball goes where the shooter put it
     const before = lite(this.game.balls);
-    const out = playShot(this.game, angle, power);
+    const out = playShot(this.game, angle, power, pocket);
     const name = (s: 0 | 1) => this.sides[s]?.name ?? BOT;
     this.game = out.game;
     this.seq++;
@@ -142,13 +143,26 @@ export class PoolEngine {
     this.startTurn();
   }
 
-  shoot(w: Who, angle: unknown, power: unknown): { ok: true } | Fail {
+  shoot(w: Who, angle: unknown, power: unknown, cue?: unknown, pocket?: unknown): { ok: true } | Fail {
     if (this.phase !== "play") return fail("There is no match in progress.");
     const side = this.sideOf(w.sockId);
     if (side < 0) return fail("You are not in this match.");
     if (this.game.turn !== side) return fail("It's not your turn.");
     if (typeof angle !== "number" || typeof power !== "number" || !Number.isFinite(angle) || !Number.isFinite(power) || power <= 0) return fail("Bad shot.");
-    this.shootNow(side, angle, Math.min(1, power));
+    let at: { x: number; y: number } | undefined;
+    if (cue !== undefined && cue !== null) {
+      const c = cue as { x?: unknown; y?: unknown };
+      if (typeof c.x !== "number" || typeof c.y !== "number") return fail("Bad cue ball spot.");
+      const why = placeProblem(this.game, c.x, c.y);
+      if (why) return fail(why);
+      at = { x: c.x, y: c.y };
+    }
+    let call: number | undefined;
+    if (needsCall(this.game)) {
+      if (typeof pocket !== "number" || !Number.isInteger(pocket) || pocket < 0 || pocket > 5) return fail("Call a pocket for the 8-ball first (click one).");
+      call = pocket;
+    }
+    this.shootNow(side, angle, Math.min(1, power), at, call);
     this.push();
     return { ok: true };
   }
@@ -179,11 +193,11 @@ export class PoolEngine {
     if (this.phase !== "play") return;
     const turn = this.game.turn;
     if (this.sides[turn] === null && this.vsBot) {
-      if (now >= this.botAt) { const s = chooseShot(this.game, this.ctx.rng, 0.72); this.shootNow(turn, s.angle, s.power); this.push(); }
+      if (now >= this.botAt) { const s = chooseShot(this.game, this.ctx.rng, 0.72); this.shootNow(turn, s.angle, s.power, s.cue, s.pocket); this.push(); }
     } else if (this.deadline !== null && now >= this.deadline) {
       this.timeouts++;
       if (this.timeouts >= 2) { this.finish(turn === 0 ? 1 : 0, `${this.sides[turn]!.name} ran out of time twice.`); this.push(); return; }
-      this.game = { ...this.game, turn: turn === 0 ? 1 : 0 };
+      this.game = { ...this.game, turn: turn === 0 ? 1 : 0, inHand: true, kitchen: false }; // running out the clock is a foul: ball in hand
       this.msg = `${this.sides[turn]!.name} ran out of time. ${this.sides[this.game.turn]?.name ?? BOT}'s turn.`;
       this.startTurn();
       this.push();
@@ -210,6 +224,7 @@ export class PoolEngine {
       host: seated >= 0 && (this.phase === "lobby" || this.phase === "over"),
       deadline: this.deadline, now: this.ctx.now(), winner: this.winner, msg: this.msg,
       returned: this.returned.get(sockId) ?? null,
+      inHand: this.phase === "play" && !!this.game.inHand, kitchen: !!this.game.kitchen, targets: this.phase === "play" ? legalTargets(this.game) : [],
     };
   }
 }

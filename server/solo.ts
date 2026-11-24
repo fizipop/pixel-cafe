@@ -5,7 +5,7 @@ import {
   MINES_TILES, PENGUIN_TILES, minesMultiplier, penguinCrackChance, penguinMultiplier, placeMines, slotMultiplier, spinReel, validBet,
   validMineCount, validPenguinLane, type PenguinLane, type SlotSymbol,
 } from "../src/shared/arcade.ts";
-import { RANK_BEANS, SONG_MS, rankOf, scoreRun } from "../src/shared/beat.ts";
+import { beansFor, chartFor, isDifficulty, songMsFor, rankOf, scoreRun, type Difficulty } from "../src/shared/beat.ts";
 import { RACE, raceBeans, track } from "../src/shared/racer.ts";
 import type { MinesView, PenguinView, RunFinish, SlotsResult } from "../src/shared/protocol.ts";
 import { fail, type EngineCtx, type Fail, type Who } from "./arcadeTypes.ts";
@@ -18,7 +18,7 @@ type MinesGame = { bet: number; mines: number; hazards: number[]; revealed: numb
 export class SoloGames {
   private mines = new Map<string, MinesGame>(); // by client id
   private penguin = new Map<string, PenguinGame>();
-  private runs = new Map<string, { token: number; at: number }>();
+  private runs = new Map<string, { token: number; at: number; diff: Difficulty }>();
   private lastToken = 0;
   readonly rewards: FreeRewards;
 
@@ -182,9 +182,9 @@ export class SoloGames {
 
   // ------------------------------------------------------------ Neon Drift GP and Beat Battle (a run is started, then finished)
 
-  runStart(game: "racer" | "beat", w: Who): { ok: true; token: number } {
+  runStart(game: "racer" | "beat", w: Who, diff?: unknown): { ok: true; token: number } {
     const token = ++this.lastToken;
-    this.runs.set(`${game}:${w.clientId}`, { token, at: this.ctx.now() });
+    this.runs.set(`${game}:${w.clientId}`, { token, at: this.ctx.now(), diff: isDifficulty(diff) ? diff : "normal" }); // Beat Battle remembers which level you started
     return { ok: true, token };
   }
 
@@ -200,7 +200,7 @@ export class SoloGames {
     const run = this.takeRun("racer", w, token);
     if (!run) return fail("That race has already been recorded.");
     const min = track().minLapMs;
-    if (!Number.isInteger(totalMs) || !Number.isInteger(bestLapMs) || !Number.isInteger(position) || (position as number) < 1 || (position as number) > 4) return fail("Bad race result.");
+    if (!Number.isInteger(totalMs) || !Number.isInteger(bestLapMs) || !Number.isInteger(position) || (position as number) < 1 || (position as number) > RACE.FIELD) return fail("Bad race result.");
     const total = totalMs as number, lap = bestLapMs as number;
     if (lap < min || total < RACE.LAPS * min || lap * RACE.LAPS > total + 5) return fail("Those lap times are not possible on this track.");
     if (this.ctx.now() - run.at < RACE.COUNTDOWN_MS + total - 3000) return fail("That race finished faster than real time.");
@@ -213,11 +213,12 @@ export class SoloGames {
   beatFinish(w: Who, token: unknown, seq: unknown): ({ ok: true; rankLetter: string; score: number; maxCombo: number } & RunFinish) | Fail {
     const run = this.takeRun("beat", w, token);
     if (!run) return fail("That song has already been recorded.");
-    const s = scoreRun(seq);
+    const chart = chartFor(run.diff);
+    const s = scoreRun(seq, chart);
     if (!s) return fail("Bad run data.");
-    if (this.ctx.now() - run.at < SONG_MS - 4000) return fail("That song finished faster than real time.");
-    const letter = rankOf(s);
-    const beans = this.rewards.grant(w.clientId, RANK_BEANS[letter]);
+    if (this.ctx.now() - run.at < songMsFor(run.diff) - 4000) return fail("That song finished faster than real time.");
+    const letter = rankOf(s, chart.length);
+    const beans = this.rewards.grant(w.clientId, beansFor(letter, run.diff));
     if (beans > 0) { this.ctx.wallets.credit(w.clientId, beans); this.ctx.touch(w.clientId); }
     const r = s.failed ? { best: false, rank: null } : this.record("beat", w, s.score);
     return { ok: true, beans, best: r.best, rank: r.rank, value: s.score, rankLetter: letter, score: s.score, maxCombo: s.maxCombo };

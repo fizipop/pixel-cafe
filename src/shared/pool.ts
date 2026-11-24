@@ -2,16 +2,22 @@
 // server runs the real shot, the browser replays the very same shot to animate it, and both land on
 // exactly the same final positions. Table units are pixels, y points down.
 //
-// Simplified rules: break; the table is open until someone pockets a ball (that decides solids/stripes);
-// pocket one of your own to keep shooting; a foul (scratch, wrong ball first, nothing pocketed and no
-// rail hit) gives the other player the turn with the cue ball back on the head spot; the 8 wins only
-// after your group is cleared, and loses if pocketed early.
+// Rules (Miniclip-style 8-ball): break; the table is open until someone pockets a ball (that decides
+// solids/stripes); pocket one of your own to keep shooting. A foul (scratch, wrong ball first, nothing hit,
+// or nothing pocketed and no rail touched after contact) gives the other player the turn AND the cue ball
+// in hand: they may place it anywhere (behind the head string after a scratch on the break). The 8 wins only
+// after your group is cleared and only in the pocket you called; it loses if pocketed early, on a scratch,
+// or in the wrong pocket.
 
 export const POOL = {
   W: 800, H: 400, R: 10,
   CORNER_R: 24, SIDE_R: 20, // how close a ball centre must get to a pocket to drop
   VMAX: 1300, // cue ball speed at full power (px/s)
-  DECEL: 280, // table friction (px/s^2)
+  // Cloth friction. A rolling ball loses speed to a constant rolling resistance (DECEL) plus a small drag that grows
+  // with speed (DAMP, from the nap of the cloth and the air), so fast balls shed pace a little quicker and slow balls
+  // glide on and roll out smoothly instead of dying on the spot. Table scale: 800 px is about 2.54 m.
+  DECEL: 105, // rolling resistance (px/s^2); was 280, which stopped balls far too quickly
+  DAMP: 0.18, // speed-proportional cloth drag (1/s)
   RAIL: 0.85, // energy kept on a cushion bounce
   BALL: 0.96, // energy kept in a ball-ball collision
   DT: 1 / 240,
@@ -41,12 +47,12 @@ export function rackBalls(): PoolBall[] {
   return balls;
 }
 
-export type ShotEvents = { firstHit: number | null; pocketed: number[]; railAfterContact: boolean };
+export type ShotEvents = { firstHit: number | null; pocketed: number[]; railAfterContact: boolean; pocketOf?: Record<number, number> /* ball id -> pocket index (see POCKETS) */ };
 
 /** One shot in progress. `step()` advances a fixed 1/240 s; keep calling until `done`. */
 export class PoolSim {
   balls: PoolBall[];
-  events: ShotEvents = { firstHit: null, pocketed: [], railAfterContact: false };
+  events: ShotEvents = { firstHit: null, pocketed: [], railAfterContact: false, pocketOf: {} };
   steps = 0;
 
   constructor(balls: PoolBall[], angle: number, power: number) {
@@ -71,9 +77,11 @@ export class PoolSim {
     }
     // pockets first, so a ball rolling into a corner drops instead of bouncing off the cushions
     for (const b of live) {
-      if (POCKETS.some((p) => Math.hypot(b.x - p.x, b.y - p.y) < p.r)) {
+      const pi = POCKETS.findIndex((p) => Math.hypot(b.x - p.x, b.y - p.y) < p.r);
+      if (pi >= 0) {
         b.out = true; b.vx = 0; b.vy = 0;
         this.events.pocketed.push(b.id);
+        (this.events.pocketOf ??= {})[b.id] = pi;
       }
     }
     const rail = (b: PoolBall) => { if (this.events.firstHit !== null) this.events.railAfterContact = true; void b; };
@@ -107,7 +115,7 @@ export class PoolSim {
       if (b.out) continue;
       const v = Math.hypot(b.vx, b.vy);
       if (v === 0) continue;
-      const nv = v - POOL.DECEL * DT;
+      const nv = v - (POOL.DECEL + POOL.DAMP * v) * DT;
       if (nv <= POOL.STOP) { b.vx = 0; b.vy = 0; } else { b.vx *= nv / v; b.vy *= nv / v; }
     }
   }
@@ -125,8 +133,10 @@ export type PoolGame = {
   turn: 0 | 1;
   groups: [PoolGroup | null, PoolGroup | null];
   breaking: boolean;
+  inHand?: boolean; // the player to shoot has the cue ball in hand (after a foul): they may place it first
+  kitchen?: boolean; // ...but only behind the head string (a scratch on the break)
 };
-export const newPoolGame = (turn: 0 | 1 = 0): PoolGame => ({ balls: rackBalls(), turn, groups: [null, null], breaking: true });
+export const newPoolGame = (turn: 0 | 1 = 0): PoolGame => ({ balls: rackBalls(), turn, groups: [null, null], breaking: true, inHand: false, kitchen: false });
 
 export type ShotOutcome = {
   game: PoolGame; // the table after the shot
@@ -160,7 +170,25 @@ export function respotCue(balls: PoolBall[]): { x: number; y: number } {
   return { ...HEAD_SPOT };
 }
 
-export function applyShot(pre: PoolGame, sim: PoolSim): ShotOutcome {
+/** Why the cue ball can't go at (x, y) right now, or null when the spot is fine. */
+export function placeProblem(g: PoolGame, x: number, y: number): string | null {
+  if (!g.inHand) return "You don't have the cue ball in hand.";
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return "Bad spot.";
+  const { R, W, H } = POOL;
+  if (x < R || x > W - R || y < R || y > H - R) return "Keep the cue ball on the cloth.";
+  if (g.kitchen && x > HEAD_SPOT.x) return "After a scratch on the break, place it behind the head string.";
+  if (g.balls.some((b) => b.id !== 0 && !b.out && Math.hypot(b.x - x, b.y - y) < R * 2 + 0.5)) return "That spot is touching another ball.";
+  return null;
+}
+/** A copy of the game with the cue ball placed (it stays in hand until the shot is taken). */
+export function placeCue(g: PoolGame, at: { x: number; y: number } | null | undefined): PoolGame {
+  if (!at || placeProblem(g, at.x, at.y)) return g;
+  return { ...g, balls: g.balls.map((b) => (b.id === 0 ? { ...b, x: at.x, y: at.y, vx: 0, vy: 0, out: false } : { ...b })) };
+}
+/** True when the shooter's only legal target is the 8-ball, so they must call a pocket for it. */
+export const needsCall = (g: PoolGame) => { const t = legalTargets(g); return t.length === 1 && t[0] === 8; };
+
+export function applyShot(pre: PoolGame, sim: PoolSim, call?: number): ShotOutcome {
   const ev = sim.events;
   const me = pre.turn;
   const opp: 0 | 1 = me === 0 ? 1 : 0;
@@ -184,7 +212,11 @@ export function applyShot(pre: PoolGame, sim: PoolSim): ShotOutcome {
     if (pre.breaking) {
       const b8 = balls.find((b) => b.id === 8)!;
       b8.out = false; b8.x = FOOT_SPOT.x + 2 * (POOL.R * 2 * Math.cos(Math.PI / 6) + 0.2); b8.y = FOOT_SPOT.y; // spotted again
-    } else if (!foul && targets.length === 1 && targets[0] === 8) { winner = me; reason = "Sank the 8-ball to win!"; }
+    } else if (!foul && targets.length === 1 && targets[0] === 8) {
+      const into = ev.pocketOf?.[8];
+      if (call !== undefined && into !== undefined && into !== call) { winner = opp; reason = "Sank the 8-ball in the wrong pocket."; }
+      else { winner = me; reason = "Sank the 8-ball to win!"; }
+    }
     else { winner = opp; reason = scratch ? "Pocketed the 8-ball with a scratch." : "Pocketed the 8-ball too early."; }
   }
   // the table is open until a ball drops on a legal shot
@@ -196,15 +228,68 @@ export function applyShot(pre: PoolGame, sim: PoolSim): ShotOutcome {
   const mineNow = groups[me];
   const keepsTurn = !foul && !winner && dropped.some((id) => (mineNow ? groupOf(id) === mineNow : true));
   const cue = balls[0];
-  if (scratch || foul) { cue.out = false; Object.assign(cue, respotCue(balls), { vx: 0, vy: 0 }); }
-
-  const next: PoolGame = { balls, turn: keepsTurn ? me : opp, groups, breaking: false };
+  if (scratch) { cue.out = false; Object.assign(cue, respotCue(balls), { vx: 0, vy: 0 }); } // a dropped cue ball comes back on the head spot, then it's in hand
+  const inHand = !!foul && !winner;
+  const next: PoolGame = { balls, turn: keepsTurn ? me : opp, groups, breaking: false, inHand, kitchen: inHand && pre.breaking && scratch };
   return { game: next, foul, pocketed: ev.pocketed, winner, reason };
 }
 
 /** Run a whole shot and apply the rules (what the server does). */
-export function playShot(pre: PoolGame, angle: number, power: number): ShotOutcome {
-  return applyShot(pre, new PoolSim(pre.balls, angle, power).run());
+export function playShot(pre: PoolGame, angle: number, power: number, call?: number): ShotOutcome {
+  return applyShot(pre, new PoolSim(pre.balls, angle, power).run(), call);
+}
+
+// ------------------------------------------------------------------ aiming aid
+
+export type AimPreview = {
+  /** The cue ball's path: from the ball to the first contact (or rail), then on after one cushion bounce. */
+  path: { x: number; y: number }[];
+  /** Set when the cue ball hits a ball: where the cue ball will be, which ball, and where each goes next. */
+  hit: { id: number; ghost: { x: number; y: number }; objDir: { x: number; y: number }; cueDir: { x: number; y: number } | null } | null;
+  bounced: boolean;
+};
+
+/** Where a shot at `angle` will go: the first ball it touches (ghost ball + deflection lines) or the first cushion bounce. */
+export function aimPreview(balls: { id: number; x: number; y: number; out: boolean }[], angle: number): AimPreview {
+  const { R, W, H } = POOL;
+  const cue = balls.find((b) => b.id === 0 && !b.out);
+  if (!cue) return { path: [], hit: null, bounced: false };
+  let px = cue.x, py = cue.y, dx = Math.cos(angle), dy = Math.sin(angle);
+  const path = [{ x: px, y: py }];
+  let bounced = false;
+  for (let leg = 0; leg < 2; leg++) {
+    // nearest ball the centre line runs into (centres end up 2R apart)
+    let tBall = Infinity, hitBall: (typeof balls)[number] | null = null;
+    for (const b of balls) {
+      if (b.id === 0 || b.out) continue;
+      const fx = b.x - px, fy = b.y - py;
+      const along = fx * dx + fy * dy;
+      if (along <= 0) continue;
+      const perp2 = fx * fx + fy * fy - along * along;
+      if (perp2 >= 4 * R * R) continue;
+      const t = along - Math.sqrt(4 * R * R - perp2);
+      if (t >= 0 && t < tBall) { tBall = t; hitBall = b; }
+    }
+    // nearest cushion
+    const tx = dx > 1e-9 ? (W - R - px) / dx : dx < -1e-9 ? (R - px) / dx : Infinity;
+    const ty = dy > 1e-9 ? (H - R - py) / dy : dy < -1e-9 ? (R - py) / dy : Infinity;
+    const tRail = Math.min(tx, ty);
+    if (hitBall && tBall <= tRail) {
+      const gx = px + dx * tBall, gy = py + dy * tBall;
+      path.push({ x: gx, y: gy });
+      let ox = hitBall.x - gx, oy = hitBall.y - gy; const ol = Math.hypot(ox, oy) || 1; ox /= ol; oy /= ol;
+      const dot = dx * ox + dy * oy;
+      const cx = dx - ox * dot, cy = dy - oy * dot; const cl = Math.hypot(cx, cy);
+      return { path, hit: { id: hitBall.id, ghost: { x: gx, y: gy }, objDir: { x: ox, y: oy }, cueDir: cl > 0.05 ? { x: cx / cl, y: cy / cl } : null }, bounced };
+    }
+    px += dx * tRail; py += dy * tRail;
+    path.push({ x: px, y: py });
+    if (leg === 1) break;
+    if (tx <= ty) dx = -dx; else dy = -dy; // bounce off the cushion and look again
+    if (tx === ty) { dx = -dx; dy = -dy; }
+    bounced = true;
+  }
+  return { path, hit: null, bounced };
 }
 
 // ------------------------------------------------------------------ the computer opponent
@@ -212,28 +297,41 @@ export function playShot(pre: PoolGame, angle: number, power: number): ShotOutco
 const norm = (n: number) => Math.atan2(Math.sin(n), Math.cos(n));
 
 /** Pick a shot by trying aimed candidates through the real physics. `skill` 0..1 shrinks the random wobble. */
-export function chooseShot(g: PoolGame, rng: () => number, skill = 0.7): { angle: number; power: number } {
+export type BotShot = { angle: number; power: number; cue?: { x: number; y: number }; pocket?: number };
+
+export function chooseShot(g: PoolGame, rng: () => number, skill = 0.7): BotShot {
   const cue = g.balls[0];
   const targets = legalTargets(g);
-  type Cand = { angle: number; power: number; score: number };
-  const cands: { angle: number; power: number }[] = [];
+  type Cand = BotShot & { score: number };
+  const cands: BotShot[] = [];
+  const call8 = needsCall(g);
   for (const id of targets) {
     const t = g.balls.find((b) => b.id === id)!;
-    for (const p of POCKETS) {
+    POCKETS.forEach((p, pi) => {
       const dx = p.x - t.x, dy = p.y - t.y, d = Math.hypot(dx, dy);
-      const gx = t.x - (dx / d) * POOL.R * 2, gy = t.y - (dy / d) * POOL.R * 2; // where the cue ball must be to send t at the pocket
-      const angle = Math.atan2(gy - cue.y, gx - cue.x);
-      const cut = Math.abs(norm(angle - Math.atan2(t.y - cue.y, t.x - cue.x)));
-      if (cut > 1.2) continue;
-      const dist = Math.hypot(gx - cue.x, gy - cue.y) + d;
-      for (const power of [Math.min(1, 0.3 + dist / 1400), Math.min(1, 0.5 + dist / 1100), 0.9]) cands.push({ angle, power });
-    }
-    cands.push({ angle: Math.atan2(t.y - cue.y, t.x - cue.x), power: 0.45 }); // just hit it
+      const ux = dx / d, uy = dy / d;
+      const gx = t.x - ux * POOL.R * 2, gy = t.y - uy * POOL.R * 2; // where the cue ball must be to send t at the pocket
+      const spots: ({ x: number; y: number } | undefined)[] = [undefined];
+      if (g.inHand) for (const back of [70, 120, 40]) spots.push({ x: gx - ux * back, y: gy - uy * back }); // ball in hand: line the shot up from behind
+      for (const spot of spots) {
+        if (spot && placeProblem(g, spot.x, spot.y)) continue;
+        const from = spot ?? cue;
+        const angle = Math.atan2(gy - from.y, gx - from.x);
+        const cut = Math.abs(norm(angle - Math.atan2(t.y - from.y, t.x - from.x)));
+        if (cut > 1.2) continue;
+        const dist = Math.hypot(gx - from.x, gy - from.y) + d;
+        for (const power of [Math.min(1, 0.3 + dist / 1400), Math.min(1, 0.5 + dist / 1100), 0.9]) cands.push({ angle, power, cue: spot, pocket: pi });
+      }
+    });
+    if (!call8) cands.push({ angle: Math.atan2(t.y - cue.y, t.x - cue.x), power: 0.45 }); // just hit it
   }
-  if (cands.length === 0) cands.push({ angle: rng() * Math.PI * 2, power: 0.5 });
+  if (cands.length === 0) {
+    const t = g.balls.find((b) => b.id === targets[0]) ?? g.balls[1];
+    cands.push(t ? { angle: Math.atan2(t.y - cue.y, t.x - cue.x), power: 0.5, pocket: 0 } : { angle: rng() * Math.PI * 2, power: 0.5, pocket: 0 });
+  }
   let best: Cand | null = null;
-  for (const c of cands.slice(0, 48)) {
-    const o = playShot(g, c.angle, c.power);
+  for (const c of cands.slice(0, g.inHand ? 72 : 48)) {
+    const o = playShot(placeCue(g, c.cue), c.angle, c.power, c.pocket);
     const mine = g.groups[g.turn];
     const own = o.pocketed.filter((id) => id !== 0 && id !== 8 && (!mine || groupOf(id) === mine)).length;
     const score = o.winner === g.turn ? 1000 : o.winner !== null ? -1000 : o.foul ? (o.pocketed.includes(0) ? -200 : -80) : 20 + own * 100 + (o.game.turn === g.turn ? 30 : 0);
@@ -241,5 +339,5 @@ export function chooseShot(g: PoolGame, rng: () => number, skill = 0.7): { angle
   }
   const wobble = (1 - Math.min(1, Math.max(0, skill))) * 0.05 + 0.004; // radians
   const pick = best as Cand;
-  return { angle: pick.angle + (rng() - 0.5) * 2 * wobble, power: Math.min(1, Math.max(0.1, pick.power + (rng() - 0.5) * 0.08)) };
+  return { angle: pick.angle + (rng() - 0.5) * 2 * wobble, power: Math.min(1, Math.max(0.1, pick.power + (rng() - 0.5) * 0.08)), cue: pick.cue, pocket: pick.pocket };
 }

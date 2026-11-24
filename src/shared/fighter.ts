@@ -7,7 +7,9 @@ export const FIGHT = {
   ROUND_FRAMES: 60 * 60, INTRO: 100, KO_PAUSE: 130, ROUNDS_TO_WIN: 2,
 } as const;
 
-export const BTN = { LEFT: 1, RIGHT: 2, UP: 4, BLOCK: 8, LIGHT: 16, HEAVY: 32, SPECIAL: 64 } as const;
+// A/D walk, W jumps, S crouches (DOWN), J/K/L are light/heavy/special and `;` is BLOCK. Holding *back* also blocks.
+export const BTN = { LEFT: 1, RIGHT: 2, UP: 4, BLOCK: 8, LIGHT: 16, HEAVY: 32, SPECIAL: 64, DOWN: 128 } as const;
+export const METER_MAX = 100; // the super meter: fills as you trade blows; a full one powers up your next special
 export type Buttons = number;
 
 type Move = { dmg: number; startup: number; active: number; recover: number; reach: number; stun: number; knock: number };
@@ -49,16 +51,17 @@ export const CHARACTERS: CharDef[] = [
   },
 ];
 
-export type FState = "idle" | "walk" | "jump" | "block" | "light" | "heavy" | "special" | "hit" | "ko" | "win";
+export type FState = "idle" | "walk" | "jump" | "crouch" | "block" | "light" | "heavy" | "special" | "hit" | "ko" | "win";
 export type Fighter = {
   c: number; // index into CHARACTERS
   x: number; y: number; vx: number; vy: number; // y is height above the ground
   face: 1 | -1;
   hp: number;
   state: FState; t: number; hitDone: boolean; stun: number; cd: number;
+  meter: number; sup: boolean; // super meter (0..METER_MAX) and whether the special in progress is the powered-up one
   prev: Buttons;
 };
-export type Shot = { x: number; y: number; vx: number; owner: 0 | 1; dmg: number; kind: string };
+export type Shot = { x: number; y: number; vx: number; owner: 0 | 1; dmg: number; kind: string; big?: boolean };
 export type FightEvent = { k: "hit" | "block" | "ko" | "fire" | "swing" | "round"; x: number; y: number; heavy?: boolean; who?: 0 | 1 };
 export type FightPhase = "intro" | "fight" | "ko" | "over";
 export type FightMatch = {
@@ -75,7 +78,7 @@ export type FightMatch = {
 };
 
 const fresh = (c: number, x: number, face: 1 | -1): Fighter => ({
-  c, x, y: 0, vx: 0, vy: 0, face, hp: CHARACTERS[c].hp, state: "idle", t: 0, hitDone: false, stun: 0, cd: 0, prev: 0,
+  c, x, y: 0, vx: 0, vy: 0, face, hp: CHARACTERS[c].hp, state: "idle", t: 0, hitDone: false, stun: 0, cd: 0, meter: 0, sup: false, prev: 0,
 });
 
 export function newMatch(c0: number, c1: number): FightMatch {
@@ -93,6 +96,9 @@ function hurt(m: FightMatch, victim: 0 | 1, attacker: 0 | 1 | null, dmg: number,
   const v = m.f[victim];
   const blocking = v.state === "block" && grounded(v) && Math.sign(from - v.x) === v.face;
   const dir = Math.sign(v.x - from) || -v.face;
+  const gain = (who: Fighter, n: number) => { who.meter = Math.min(METER_MAX, who.meter + n); };
+  if (attacker !== null) gain(m.f[attacker], blocking ? 4 : 6 + dmg * 0.8);
+  gain(v, blocking ? 3 : 4 + dmg * 0.6);
   if (blocking) {
     v.hp -= Math.max(1, Math.round(dmg * 0.12));
     v.vx = dir * knock * 0.5;
@@ -106,7 +112,6 @@ function hurt(m: FightMatch, victim: 0 | 1, attacker: 0 | 1 | null, dmg: number,
     v.hp = 0; v.state = "ko"; v.t = 0; v.vx = dir * 3; v.vy = 4;
     m.ev.push({ k: "ko", x: v.x, y: v.y + 20, who: victim });
   }
-  void attacker;
 }
 
 function control(m: FightMatch, i: 0 | 1, b: Buttons) {
@@ -116,8 +121,12 @@ function control(m: FightMatch, i: 0 | 1, b: Buttons) {
   f.prev = b;
   if (busy(f)) return;
   const air = !grounded(f);
-  if (!air && b & BTN.BLOCK) { f.state = "block"; f.vx = 0; return; }
+  const o = m.f[i === 0 ? 1 : 0];
+  const back = o.x > f.x ? BTN.LEFT : BTN.RIGHT; // holding away from the opponent
+  const danger = (busy(o) && o.state !== "hit" && o.state !== "ko" && o.state !== "win" && Math.abs(o.x - f.x) < 70) || m.shots.some((s) => s.owner !== i && Math.abs(s.x - f.x) < 60);
+  if (!air && (b & BTN.BLOCK || (b & back && danger))) { f.state = "block"; f.vx = 0; return; }
   if (press & BTN.SPECIAL && f.cd <= 0) {
+    f.sup = f.meter >= METER_MAX; if (f.sup) f.meter = 0;
     f.state = "special"; f.t = 0; f.hitDone = false; f.cd = ch.special.cooldown;
     m.ev.push({ k: "swing", x: f.x, y: f.y + 24, who: i });
     return;
@@ -126,6 +135,7 @@ function control(m: FightMatch, i: 0 | 1, b: Buttons) {
   if (press & BTN.LIGHT) { f.state = "light"; f.t = 0; f.hitDone = false; if (!air) f.vx = 0; m.ev.push({ k: "swing", x: f.x, y: f.y + 24, who: i }); return; }
   const dir = (b & BTN.RIGHT ? 1 : 0) - (b & BTN.LEFT ? 1 : 0);
   if (!air) {
+    if (b & BTN.DOWN && !(b & BTN.UP)) { f.state = "crouch"; f.vx = 0; return; }
     f.vx = dir * ch.speed;
     f.state = dir ? "walk" : "idle";
     if (b & BTN.UP) { f.vy = ch.jump; f.state = "jump"; f.vx = dir * ch.speed * 1.1; }
@@ -167,14 +177,14 @@ export function stepMatch(m: FightMatch, in0: Buttons, in1: Buttons) {
     if (f.state === "special") {
       const sp = ch.special;
       if (sp.kind === "projectile") {
-        if (f.t === 9) m.shots.push({ x: f.x + f.face * 18, y: f.y + 24, vx: f.face * sp.speed, owner: i, dmg: sp.dmg, kind: ch.id });
+        if (f.t === 9) m.shots.push({ x: f.x + f.face * 18, y: f.y + 24, vx: f.face * sp.speed * (f.sup ? 1.25 : 1), owner: i, dmg: f.sup ? Math.round(sp.dmg * 1.7) : sp.dmg, kind: ch.id, big: f.sup });
         if (f.t >= 26) { f.state = "idle"; f.vx = 0; }
       } else {
         if (f.t >= 4 && f.t < 22) f.vx = f.face * sp.speed;
         const reach = f.face === 1 ? o.x - f.x : f.x - o.x;
         if (!f.hitDone && f.t >= 4 && f.t < 22 && reach > -6 && reach <= 26 && Math.abs(o.y - f.y) < 40 && o.state !== "ko") {
           f.hitDone = true;
-          hurt(m, i === 0 ? 1 : 0, i, sp.dmg, 22, 5, true, f.x);
+          hurt(m, i === 0 ? 1 : 0, i, f.sup ? Math.round(sp.dmg * 1.7) : sp.dmg, 22, 5, true, f.x);
         }
         if (f.t >= 34) { f.state = "idle"; f.vx = 0; }
       }
@@ -209,7 +219,8 @@ export function stepMatch(m: FightMatch, in0: Buttons, in1: Buttons) {
   m.shots = m.shots.filter((s) => {
     s.x += s.vx;
     const victim = m.f[s.owner === 0 ? 1 : 0];
-    if (Math.abs(s.x - victim.x) < 14 && Math.abs(s.y - (victim.y + 24)) < 20 && victim.state !== "ko") {
+    const centre = victim.y + (victim.state === "crouch" ? 12 : 24); // ducking lets a standing-height shot pass overhead
+    if (Math.abs(s.x - victim.x) < 14 && Math.abs(s.y - centre) < (victim.state === "crouch" ? 11 : 20) && victim.state !== "ko") {
       hurt(m, s.owner === 0 ? 1 : 0, s.owner, s.dmg, 16, 3, false, s.x - Math.sign(s.vx) * 8);
       return false;
     }

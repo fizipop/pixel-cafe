@@ -352,12 +352,13 @@ test("racer: a closed circuit with pads, oil, and a sane minimum lap time", () =
   assert.equal(tr.pads.length, 4);
   assert.equal(tr.oil.length, 4);
   assert.ok(tr.minLapMs > 4000 && tr.minLapMs < 15000, `${tr.minLapMs}`);
-  assert.equal(RACE.LAPS, 3);
+  assert.equal(RACE.LAPS, 4);
+  assert.equal(RACE.FIELD, 20);
   const a = tr.pts[0], z = tr.pts[tr.pts.length - 1];
   assert.ok(Math.hypot(a.x - z.x, a.y - z.y) < 60, "the loop closes");
 });
 
-test("racer: cars wait for the lights, three CPU racers finish three laps, and positions are sorted", () => {
+test("racer: a 20-car grid waits for the lights, every CPU racer finishes four laps, and positions are sorted", () => {
   const r = newRace(3);
   const rng = mulberry32(3);
   const x0 = r.cars[0].x;
@@ -369,8 +370,8 @@ test("racer: cars wait for the lights, three CPU racers finish three laps, and p
   assert.ok(cpu.every((c) => c.lap >= RACE.LAPS && c.finishedAt !== null), "every CPU racer finished");
   assert.ok(cpu.every((c) => c.best >= track().minLapMs), "no CPU lap beats the server's minimum");
   const pos = positions(r);
-  assert.deepEqual([...pos].sort(), [1, 2, 3, 4]);
-  assert.equal(pos[0], 4, "a parked player is last");
+  assert.deepEqual([...pos].sort((a, b) => a - b), Array.from({ length: RACE.FIELD }, (_, i) => i + 1));
+  assert.equal(pos[0], RACE.FIELD, "a parked player is last");
   assert.deepEqual([1, 2, 3, 4].map(raceBeans), [30, 18, 8, 0]);
   assert.equal(fmtTime(65432), "1:05.432");
   assert.equal(fmtTime(Infinity), "--:--.---");
