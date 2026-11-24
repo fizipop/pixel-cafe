@@ -40,6 +40,22 @@ export type RumourView = {
   sample?: boolean;
 };
 
+/** Your private table, as the server sees it (null when you are not seated at one). */
+export type TableInfo = { id: string; name: string; locked: boolean; seated: number; capacity: number };
+
+/** One outfit on the Fashion Stand. `id` is a public hash, never the device's client id. */
+export type OutfitEntry = {
+  id: string;
+  name: string; // anonymous username (escaped)
+  pixels: string[];
+  votes: number; // upvotes received today
+  inCafe: boolean;
+  mine: boolean;
+  votedByMe: boolean;
+  crowned: boolean; // currently a #1 outfit today
+};
+export type OutfitView = { day: string; entries: OutfitEntry[]; votedToday: boolean };
+
 export type GuestbookView = { entries: (Entry & { mine?: boolean })[]; signedToday: boolean };
 
 export type JoinPayload = { clientId: string; name: string; pixels: string[] };
@@ -52,9 +68,12 @@ export type InitPayload = {
   rumours: RumourView[];
   guestbook: GuestbookView;
   online: number;
+  locks: string[]; // ids of locked private tables
+  table: TableInfo | null;
+  crowns: string[]; // socket ids of players wearing a #1 outfit today
 };
 
-export type ChatMessage = { id: string; from: string; name: string; text: string; ts: number };
+export type ChatMessage = { id: string; from: string; name: string; text: string; ts: number; scope?: "table" };
 export type Result = { ok: true } | { ok: false; reason: string };
 
 // ------------------------------------------------------------------ events
@@ -72,6 +91,9 @@ export interface ClientToServer {
   "rumour:post": (p: { text: string }, ack: (r: Result) => void) => void;
   "rumour:like": (p: { id: string }) => void;
   "guestbook:sign": (p: { text: string }, ack: (r: Result) => void) => void;
+  "table:lock": (p: { locked: boolean }, ack: (r: Result) => void) => void;
+  "outfit:list": (ack: (r: { ok: true; view: OutfitView } | { ok: false; reason: string }) => void) => void;
+  "outfit:vote": (p: { id: string }, ack: (r: Result) => void) => void;
 }
 
 /** Server -> browser. */
@@ -83,10 +105,13 @@ export interface ServerToClient {
   moves: (p: MoveUpdate[]) => void; // batched, volatile (may be dropped; the next one fixes it)
   emote: (p: { id: string; n: number }) => void;
   seats: (p: SeatSnapshot) => void; // full seat snapshot after any change
-  chat: (p: ChatMessage) => void; // only sent to players near the sender (and the sender)
+  chat: (p: ChatMessage) => void; // only sent to players near the sender, or (scope "table") to the sender's private table
   system: (p: { text: string }) => void; // "X switched the jukebox to ..."
   world: (p: WorldState) => void; // full shared state after any change
   rumours: (p: RumourView[]) => void; // personalised per player
   guestbook: (p: GuestbookView) => void; // personalised per player
   online: (p: { count: number }) => void;
+  "table:info": (p: TableInfo | null) => void; // your own private table, sent when it changes
+  locks: (p: string[]) => void; // which private tables are locked (for the padlock on the table)
+  crowns: (p: string[]) => void; // who wears the #1 outfit crown right now (socket ids)
 }

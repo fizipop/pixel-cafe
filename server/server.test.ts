@@ -76,3 +76,39 @@ test("two real clients: presence, movement, profile, chat, jukebox, disconnect",
     await srv.close();
   }
 });
+
+test("Phase 5 events work over real sockets: outfit board + private table lock", async () => {
+  const srv = createCafeServer();
+  await new Promise<void>((r) => srv.http.listen(0, r));
+  const url = `http://localhost:${(srv.http.address() as AddressInfo).port}`;
+  const a = connect(url, { transports: ["websocket"], forceNew: true });
+  const b = connect(url, { transports: ["websocket"], forceNew: true });
+  try {
+    const ja = await a.timeout(2000).emitWithAck("join", { clientId: "ca", name: "Alice", pixels });
+    const jb = await b.timeout(2000).emitWithAck("join", { clientId: "cb", name: "Bob", pixels });
+    assert.deepEqual(ja.init.locks, []);
+    assert.equal(jb.init.table, null);
+
+    const list = await a.timeout(2000).emitWithAck("outfit:list");
+    assert.equal(list.ok, true);
+    assert.equal(list.view.entries.length, 2);
+    const bob = list.view.entries.find((e: any) => e.name === "Bob");
+    assert.equal((await a.timeout(2000).emitWithAck("outfit:vote", { id: list.view.entries.find((e: any) => e.mine).id })).ok, false);
+    const crowns = waitFor<string[]>(b, "crowns", (c) => c.length === 1);
+    assert.equal((await a.timeout(2000).emitWithAck("outfit:vote", { id: bob.id })).ok, true);
+    assert.deepEqual(await crowns, [b.id]);
+
+    assert.equal((await a.timeout(2000).emitWithAck("table:lock", { locked: true })).ok, false); // not seated
+    const info = waitFor<any>(a, "table:info", (t) => t?.seated === 1);
+    a.emit("move", { x: 700, y: 330, flip: false, moving: false });
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal((await a.timeout(2000).emitWithAck("sit", { seatId: "pt0-bottom1" })).ok, true);
+    assert.equal((await info).capacity, 6);
+    const locks = waitFor<string[]>(b, "locks", (l) => l.includes("pt0"));
+    assert.equal((await a.timeout(2000).emitWithAck("table:lock", { locked: true })).ok, true);
+    await locks;
+  } finally {
+    a.close(); b.close();
+    await srv.close();
+  }
+});

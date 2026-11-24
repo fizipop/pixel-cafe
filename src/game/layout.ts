@@ -34,6 +34,45 @@ export type Seat = {
   exit: { x: number; y: number }; // where you stand to sit, and where you land when you get up
 };
 
+// ---- Phase 5: private tables (up to 6 seats) --------------------------------------
+
+/** A long table in the lounge: 2 seats on each long side + 1 at each end = 6. Chat is private to the sitters. */
+export const PRIVATE_TABLES = [{ id: "pt0", name: "Private Table", x: 704, y: 236, w: 96 }];
+export const PRIVATE_CAPACITY = 6;
+
+/** Which private table (if any) a seat belongs to. Seat ids look like "pt0-top1". */
+export function privateTableOf(seatId: string | null | undefined): string | null {
+  if (!seatId) return null;
+  return PRIVATE_TABLES.find((t) => seatId.startsWith(`${t.id}-`))?.id ?? null;
+}
+
+export function privateSeats(): Seat[] {
+  const out: Seat[] = [];
+  for (const t of PRIVATE_TABLES) {
+    const { x, y, w } = t;
+    const a = w / 4; // 24 and 72 on a 96px table
+    const chair = (suffix: string, sx: number, sy: number, depth: number, flipX: boolean, ex: number, ey: number): Seat => ({
+      id: `${t.id}-${suffix}`, kind: "chair", x: sx, y: sy, depth, flipX, exit: { x: ex, y: ey },
+    });
+    out.push(
+      chair("top1", x + a, y + 5, y + 11, false, x + a, y + 8),
+      chair("top2", x + 3 * a, y + 5, y + 11, false, x + 3 * a, y + 8),
+      chair("left", x - 9, y + 37, y + 47, false, x - 8, y + 56),
+      chair("right", x + w + 9, y + 37, y + 47, true, x + w + 8, y + 56),
+      chair("bottom1", x + a, y + 58, y + 79, false, x + a, y + 80),
+      chair("bottom2", x + 3 * a, y + 58, y + 79, false, x + 3 * a, y + 80),
+    );
+  }
+  return out;
+}
+
+// Fashion Stand (outfit leaderboard): a mannequin by the front windows, left of the door.
+export const OUTFIT_STAND = {
+  x: 292, y: 646, w: 40, h: 56, // top-left of the sprite
+  solid: { x: 296, y: 684, w: 32, h: 16 },
+  spot: { x: 312, y: 712 }, // stand here to use it
+};
+
 export function buildSeats(): Seat[] {
   const seats: Seat[] = [];
   TABLES.forEach(([col, row], i) => {
@@ -61,6 +100,7 @@ export function buildSeats(): Seat[] {
       });
     });
   }
+  seats.push(...privateSeats());
   return seats;
 }
 

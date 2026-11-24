@@ -1,35 +1,34 @@
-// In-memory shared boards (rumours + guestbook). Swap the Maps for a database later; the
-// methods are the whole API the room uses.
+// Shared boards (rumours + guestbook). All data goes through a Repository (see repository.ts),
+// so the storage can change (memory, JSON file, Supabase) without touching these rules.
 import {
   POST_COOLDOWN_MS, RUMOUR_TTL_MS, SAMPLE_RUMOURS, validateRumour, validateText,
 } from "../src/lib/rumours.ts";
 import { NOTE_MAX, SAMPLE_ENTRIES, dayKey } from "../src/lib/guestbook.ts";
 import { escapeHtml } from "../src/shared/text.ts";
 import type { GuestbookView, Result, RumourView } from "../src/shared/protocol.ts";
+import type { Repository } from "./repository.ts";
 
 type Clock = () => number;
 const MAX_POSTS = 300;
-
-type Post = { id: string; text: string; createdAt: number; author: string };
+const newId = (prefix: string, t: number) => `${prefix}${t.toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 
 export class RumourBoard {
-  private posts: Post[] = []; // newest first
-  private likes = new Map<string, Set<string>>(); // post id -> client ids that liked it
   private lastPost = new Map<string, number>();
-  private seq = 0;
+  private repo: Repository;
   private now: Clock;
 
-  constructor(now: Clock = Date.now) {
+  constructor(repo: Repository, now: Clock = Date.now) {
+    this.repo = repo;
     this.now = now;
+    this.prune(); // posts that expired while the server was off
   }
 
   /** Drop posts older than 48 hours. Returns true if anything was removed. */
   prune(): boolean {
     const cutoff = this.now() - RUMOUR_TTL_MS;
-    const keep = this.posts.filter((p) => p.createdAt > cutoff);
-    if (keep.length === this.posts.length) return false;
-    for (const p of this.posts) if (p.createdAt <= cutoff) this.likes.delete(p.id);
-    this.posts = keep;
+    const old = this.repo.listRumours().filter((p) => p.createdAt <= cutoff).map((p) => p.id);
+    if (old.length === 0) return false;
+    this.repo.removeRumours(old);
     return true;
   }
 
@@ -43,69 +42,62 @@ export class RumourBoard {
       return { ok: false, reason: `Give it a moment: you can pin another in ${Math.ceil((POST_COOLDOWN_MS - (t - last)) / 1000)}s.` };
     }
     const text = escapeHtml(v.text);
-    if (this.posts.some((p) => p.text === text)) return { ok: false, reason: "Someone already pinned that one." };
+    if (this.repo.listRumours().some((p) => p.text === text)) return { ok: false, reason: "Someone already pinned that one." };
     this.lastPost.set(clientId, t);
-    this.posts.unshift({ id: `r${t.toString(36)}${(this.seq++).toString(36)}`, text, createdAt: t, author: clientId });
-    if (this.posts.length > MAX_POSTS) this.posts.length = MAX_POSTS;
+    this.repo.addRumour({ id: newId("r", t), text, createdAt: t, author: clientId }, MAX_POSTS);
     return { ok: true };
   }
 
   /** Toggle your like. Returns false for unknown posts. */
   like(clientId: string, id: string): boolean {
     this.prune();
-    const known = this.posts.some((p) => p.id === id) || SAMPLE_RUMOURS.some((s) => s.id === id);
+    const known = this.repo.listRumours().some((p) => p.id === id) || SAMPLE_RUMOURS.some((s) => s.id === id);
     if (!known) return false;
-    const set = this.likes.get(id) ?? new Set<string>();
-    if (!set.delete(clientId)) set.add(clientId);
-    this.likes.set(id, set);
+    this.repo.setRumourLike(id, clientId, !this.repo.rumourLikes(id).includes(clientId));
     return true;
   }
 
   view(clientId: string): RumourView[] {
+    this.prune();
     const v = (id: string, text: string, createdAt: number, base: number, author: string | null, sample: boolean): RumourView => {
-      const set = this.likes.get(id);
-      const likedByMe = !!set?.has(clientId);
-      return { id, text, createdAt, likes: base + (set?.size ?? 0), likedByMe, mine: author === clientId, ...(sample ? { sample: true } : {}) };
+      const likes = this.repo.rumourLikes(id);
+      return { id, text, createdAt, likes: base + likes.length, likedByMe: likes.includes(clientId), mine: author === clientId, ...(sample ? { sample: true } : {}) };
     };
     return [
-      ...this.posts.map((p) => v(p.id, p.text, p.createdAt, 0, p.author, false)),
+      ...this.repo.listRumours().map((p) => v(p.id, p.text, p.createdAt, 0, p.author, false)),
       ...SAMPLE_RUMOURS.map((s) => v(s.id, s.text, 0, s.likes, null, true)),
     ];
   }
 }
 
-type Signed = { id: string; name: string; text: string; createdAt: number; author: string };
-
 export class Guestbook {
-  private entries: Signed[] = []; // newest first
-  private lastDay = new Map<string, string>();
-  private seq = 0;
+  private repo: Repository;
   private now: Clock;
 
-  constructor(now: Clock = Date.now) {
+  constructor(repo: Repository, now: Clock = Date.now) {
+    this.repo = repo;
     this.now = now;
   }
 
   sign(clientId: string, name: string, raw: string): Result {
     const t = this.now();
-    if (this.lastDay.get(clientId) === dayKey(t)) {
+    if (this.repo.lastSignDay(clientId) === dayKey(t)) {
       return { ok: false, reason: "You already signed today's page. Come back tomorrow!" };
     }
     const v = validateText(raw, NOTE_MAX);
     if (!v.ok) return v;
-    this.lastDay.set(clientId, dayKey(t));
-    this.entries.unshift({ id: `g${t.toString(36)}${(this.seq++).toString(36)}`, name, text: escapeHtml(v.text), createdAt: t, author: clientId });
-    if (this.entries.length > MAX_POSTS) this.entries.length = MAX_POSTS;
+    this.repo.setLastSignDay(clientId, dayKey(t));
+    this.repo.addGuestEntry({ id: newId("g", t), name, text: escapeHtml(v.text), createdAt: t, author: clientId }, MAX_POSTS);
     return { ok: true };
   }
 
   view(clientId: string): GuestbookView {
     return {
       entries: [
-        ...this.entries.map((e) => ({ id: e.id, name: e.name, text: e.text, createdAt: e.createdAt, mine: e.author === clientId })),
+        ...this.repo.listGuestbook().map((e) => ({ id: e.id, name: e.name, text: e.text, createdAt: e.createdAt, mine: e.author === clientId })),
         ...SAMPLE_ENTRIES,
       ],
-      signedToday: this.lastDay.get(clientId) === dayKey(this.now()),
+      signedToday: this.repo.lastSignDay(clientId) === dayKey(this.now()),
     };
   }
 }

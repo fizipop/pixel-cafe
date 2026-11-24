@@ -4,7 +4,7 @@
 // Players are addressed by socket id. In seat/table state they appear as the occupant id
 // "player:<socket id>" (NPCs are "npc:<name>"), the same ids the client uses.
 import { SeatState } from "../src/game/seats.ts";
-import { GAME_NPC, GAME_SEAT_PREFIX, NPC_SEATS, buildSeats } from "../src/game/layout.ts";
+import { GAME_NPC, GAME_SEAT_PREFIX, NPC_SEATS, PRIVATE_CAPACITY, PRIVATE_TABLES, buildSeats, privateTableOf } from "../src/game/layout.ts";
 import { WorldStore, newWorld, type WorldAction } from "../src/game/worldState.ts";
 import { chooseMove, type Side } from "../src/game/tictactoe.ts";
 import { MOODS, WEATHERS } from "../src/lib/moods.ts";
@@ -13,9 +13,11 @@ import { SPAWN, WORLD_H, WORLD_W } from "../src/game/constants.ts";
 import { cleanLine, escapeHtml } from "../src/shared/text.ts";
 import {
   CHAT_COOLDOWN_MS, CHAT_MAX, CHAT_RADIUS, NAME_MAX, SIT_REACH, playerOccupant,
-  type ChatMessage, type InitPayload, type JoinPayload, type MoveUpdate, type PlayerState, type Result,
+  type ChatMessage, type InitPayload, type JoinPayload, type MoveUpdate, type OutfitView, type PlayerState, type Result, type TableInfo,
 } from "../src/shared/protocol.ts";
 import { Guestbook, RumourBoard } from "./boards.ts";
+import { OutfitBoard } from "./outfits.ts";
+import { MemoryRepository, type Repository } from "./repository.ts";
 
 /** What the room needs from a connection. Socket.IO provides it in index.ts. */
 export interface Conn {
@@ -34,12 +36,14 @@ type Player = {
   lastEmote: number;
   lastProfile: number;
   dirty: boolean;
+  tableKey: string; // last private-table info sent to this player (to avoid repeats)
 };
 
 export type RoomOptions = {
   now?: () => number;
   schedule?: (fn: () => void, ms: number) => void; // for the NPC's thinking delay
   maxPlayers?: number;
+  repo?: Repository; // where rumours, guestbook and outfit votes are stored (default: in memory)
 };
 
 export const MAX_PLAYERS = 40;
@@ -59,6 +63,10 @@ export class Room {
   readonly world: WorldStore;
   readonly rumours: RumourBoard;
   readonly guestbook: Guestbook;
+  readonly outfits: OutfitBoard;
+  readonly repo: Repository;
+  /** Locked private tables -> socket ids allowed to (re)take a seat (those seated when it was locked). */
+  readonly locked = new Map<string, Set<string>>();
 
   private now: () => number;
   private schedule: (fn: () => void, ms: number) => void;
@@ -66,13 +74,16 @@ export class Room {
   private seatMap = new Map(buildSeats().map((s) => [s.id, s]));
   private msgSeq = 0;
   private aiPending = false;
+  private crownKey = "";
 
   constructor(opts: RoomOptions = {}) {
     this.now = opts.now ?? Date.now;
     this.schedule = opts.schedule ?? ((fn, ms) => void setTimeout(fn, ms));
     this.maxPlayers = opts.maxPlayers ?? MAX_PLAYERS;
-    this.rumours = new RumourBoard(this.now);
-    this.guestbook = new Guestbook(this.now);
+    this.repo = opts.repo ?? new MemoryRepository();
+    this.rumours = new RumourBoard(this.repo, this.now);
+    this.guestbook = new Guestbook(this.repo, this.now);
+    this.outfits = new OutfitBoard(this.repo, this.now);
     for (const [seatId, who] of Object.entries(NPC_SEATS)) this.seats.sit(who, seatId); // NPCs' chairs are taken
     this.world = new WorldStore(newWorld());
     this.world.dispatch({ type: "ttt", action: { type: "join", side: "O", by: GAME_NPC } }); // Theo plays "O"
@@ -113,11 +124,13 @@ export class Room {
 
     const state: PlayerState = { id: conn.id, name, pixels, x: SPAWN.x, y: SPAWN.y, flip: false, moving: false, drink: null };
     const others = [...this.players.values()].map((p) => p.state);
-    this.players.set(conn.id, { conn, clientId, state, seat: null, lastChat: 0, lastEmote: 0, lastProfile: 0, dirty: false });
+    this.players.set(conn.id, { conn, clientId, state, seat: null, lastChat: 0, lastEmote: 0, lastProfile: 0, dirty: false, tableKey: "" });
+    this.outfits.seen(clientId, name, pixels);
 
     this.all("player:joined", state, conn.id);
     this.all("online", { count: this.online });
     this.system(`${name} entered the cafe`);
+    this.pushCrowns();
     return {
       ok: true,
       init: {
@@ -128,6 +141,9 @@ export class Room {
         rumours: this.rumours.view(clientId),
         guestbook: this.guestbook.view(clientId),
         online: this.online,
+        locks: [...this.locked.keys()],
+        table: null,
+        crowns: this.crownedSockets(),
       },
     };
   }
@@ -139,6 +155,8 @@ export class Room {
     this.players.delete(id);
     this.all("player:left", { id });
     if (hadSeat) this.all("seats", this.seats.snapshot());
+    this.pushTables();
+    this.pushCrowns();
     this.all("online", { count: this.online });
     this.system(`${p.state.name} left the cafe`);
   }
@@ -180,6 +198,7 @@ export class Room {
     if (t - p.lastProfile < 200) return;
     p.lastProfile = t;
     p.state.pixels = pixels;
+    this.outfits.seen(p.clientId, p.state.name, pixels);
     this.all("player:profile", { id, pixels }, id);
   }
 
@@ -217,6 +236,11 @@ export class Room {
     }
     const who = occupantOf(id);
     const before = p.seat;
+    const tid = privateTableOf(seat.id);
+    if (tid && privateTableOf(before) !== tid) {
+      const allowed = this.locked.get(tid);
+      if (allowed && !allowed.has(id)) return { ok: false, reason: "That table is locked by the people sitting there." };
+    }
     if (!this.seats.sit(who, seat.id)) return { ok: false, reason: "Someone just took that seat." };
     if (before && before !== seat.id && this.isGameSeat(before) && !this.isGameSeat(seat.id)) this.leaveTable(who);
     p.seat = seat.id;
@@ -226,6 +250,7 @@ export class Room {
     p.dirty = true;
     this.all("seats", this.seats.snapshot());
     if (this.isGameSeat(seat.id)) this.joinTable(who);
+    this.pushTables();
     return { ok: true };
   }
 
@@ -237,6 +262,48 @@ export class Room {
     const seat = seatId ? this.seatMap.get(seatId) : undefined;
     if (seat) { p.state.x = seat.exit.x; p.state.y = seat.exit.y; p.dirty = true; }
     this.all("seats", this.seats.snapshot());
+    this.pushTables();
+  }
+
+  // ------------------------------------------------------ private tables
+
+  private seatedAt(tableId: string): Player[] {
+    return [...this.players.values()].filter((q) => privateTableOf(q.seat) === tableId);
+  }
+
+  private tableInfo(tableId: string): TableInfo {
+    const def = PRIVATE_TABLES.find((t) => t.id === tableId);
+    return { id: tableId, name: def?.name ?? "Private Table", locked: this.locked.has(tableId), seated: this.seatedAt(tableId).length, capacity: PRIVATE_CAPACITY };
+  }
+
+  private lastLocks = "";
+
+  /** After any seat change: unlock empty tables, tell everyone which tables are locked, tell each player about their own table. */
+  private pushTables() {
+    for (const tid of [...this.locked.keys()]) if (this.seatedAt(tid).length === 0) this.locked.delete(tid);
+    const locks = [...this.locked.keys()].sort();
+    const lk = locks.join(",");
+    if (lk !== this.lastLocks) { this.lastLocks = lk; this.all("locks", locks); }
+    for (const q of this.players.values()) {
+      const tid = privateTableOf(q.seat);
+      const info = tid ? this.tableInfo(tid) : null;
+      const key = info ? JSON.stringify(info) : "";
+      if (key === q.tableKey) continue;
+      q.tableKey = key;
+      q.conn.emit("table:info", info);
+    }
+  }
+
+  /** Open or lock the private table you are sitting at. Locking keeps everyone not already seated out. */
+  tableLock(id: string, d: { locked: unknown }): Result {
+    const p = this.get(id);
+    const tid = privateTableOf(p?.seat);
+    if (!p || !tid) return { ok: false, reason: "Sit at a private table first." };
+    if (typeof d?.locked !== "boolean") return { ok: false, reason: "Bad request." };
+    if (d.locked) this.locked.set(tid, new Set(this.seatedAt(tid).map((q) => q.conn.id)));
+    else this.locked.delete(tid);
+    this.pushTables();
+    return { ok: true };
   }
 
   /** Frees the player's seat (and their place at the game table). True if they had one. */
@@ -322,8 +389,16 @@ export class Room {
     if (Array.from(clean).length > CHAT_MAX) return { ok: false, reason: `Keep it under ${CHAT_MAX} characters.` };
     p.lastChat = t;
     const msg: ChatMessage = { id: `m${(this.msgSeq++).toString(36)}`, from: id, name: p.state.name, text: escapeHtml(clean), ts: t };
-    for (const q of this.players.values()) {
-      if (q === p || Math.hypot(q.state.x - p.state.x, q.state.y - p.state.y) <= CHAT_RADIUS) q.conn.emit("chat", msg);
+    const tid = privateTableOf(p.seat);
+    if (tid) {
+      // a private table is its own room: only the people seated there hear it
+      msg.scope = "table";
+      for (const q of this.seatedAt(tid)) q.conn.emit("chat", msg);
+    } else {
+      for (const q of this.players.values()) {
+        if (privateTableOf(q.seat)) continue; // people at a private table only hear their table
+        if (q === p || Math.hypot(q.state.x - p.state.x, q.state.y - p.state.y) <= CHAT_RADIUS) q.conn.emit("chat", msg);
+      }
     }
     return { ok: true };
   }
@@ -359,8 +434,42 @@ export class Room {
     return r;
   }
 
-  /** Housekeeping, run once a minute: expire old rumours for everyone. */
+  // ------------------------------------------------------------ outfits
+
+  private crownedSockets(): string[] {
+    const crown = this.outfits.crowned();
+    return [...this.players.values()].filter((q) => crown.has(q.clientId)).map((q) => q.conn.id).sort();
+  }
+
+  /** Tell everyone who wears the crown, if that changed. */
+  private pushCrowns() {
+    const list = this.crownedSockets();
+    const key = list.join(",");
+    if (key === this.crownKey) return;
+    this.crownKey = key;
+    this.all("crowns", list);
+  }
+
+  outfitList(id: string): { ok: true; view: OutfitView } | { ok: false; reason: string } {
+    const p = this.get(id);
+    if (!p) return { ok: false, reason: "Not in the cafe." };
+    const online = new Set([...this.players.values()].map((q) => q.clientId));
+    return { ok: true, view: this.outfits.view(p.clientId, online) };
+  }
+
+  outfitVote(id: string, d: { id: unknown }): Result {
+    const p = this.get(id);
+    if (!p) return { ok: false, reason: "Not in the cafe." };
+    if (typeof d?.id !== "string") return { ok: false, reason: "Bad request." };
+    const r = this.outfits.vote(p.clientId, d.id);
+    if (r.ok) this.pushCrowns();
+    return r;
+  }
+
+  /** Housekeeping, run once a minute: expire old rumours and stale outfits, roll the daily crown over at midnight. */
   sweep() {
     if (this.rumours.prune()) this.pushRumours();
+    this.outfits.prune();
+    this.pushCrowns();
   }
 }

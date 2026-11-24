@@ -1,6 +1,6 @@
 # Pixel Cafe
 
-An anonymous, multiplayer, pixel-art social experience. **Phase 1: landing page + pixel character editor. Phase 2: walkable cafe + lofi music. Phase 3: NPCs, sitting, Rumour Board, emotes. Phase 3.5: jukebox + weather, drink mini-game, table game, guestbook, cafe cat, sound effects. Phase 4: real-time multiplayer (Socket.IO), proximity chat, shared room state.**
+An anonymous, multiplayer, pixel-art social experience. **Phase 1: landing page + pixel character editor. Phase 2: walkable cafe + lofi music. Phase 3: NPCs, sitting, Rumour Board, emotes. Phase 3.5: jukebox + weather, drink mini-game, table game, guestbook, cafe cat, sound effects. Phase 4: real-time multiplayer (Socket.IO), proximity chat, shared room state. Phase 5: private tables, outfit leaderboard, server persistence.**
 
 ## Run it
 
@@ -26,6 +26,8 @@ If the server isn't running, `/play` still works in **solo mode** (like Phase 3.
 2. Open `http://localhost:3000/create`, draw/save a character, then open `http://localhost:3000/play` and click **Enter the cafe**.
 3. Open a **second window in a private/incognito window** (or another browser) at `http://localhost:3000/play`. Each browser profile has its own saved characters and random name, so you appear as two different people. Normal tabs of the same browser share one name and characters, which also works, but incognito is clearer.
 4. Both HUDs should show `2 in cafe`. Walk near each other and press **Enter** to chat.
+
+**Phase 5.** Sit at the long table in the lounge (6 seats) for chat only your table sees; use the HUD toggle to lock/open it. The Outfit Board (HUD button or the mannequin by the door) lets you give 1 upvote a day to someone else; today's #1 outfit(s) get a crown by their name tag. Rumours, guestbook notes and votes are saved to `server/data.json` (gitignored; override with `DATA_FILE`). Storage sits behind the `Repository` interface in `server/repository.ts`, so a Supabase version only needs a new class.
 
 Environment variables (all optional): `PORT` (server port, default 3001), `CLIENT_ORIGIN` (comma-separated allowed website origins; default allows any), `NEXT_PUBLIC_SOCKET_URL` (where the browser finds the server; default `http://<this host>:3001`, so opening the site through your LAN IP also works).
 

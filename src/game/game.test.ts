@@ -35,9 +35,9 @@ test("SeatState: snapshot round-trips and notifies listeners", () => {
 });
 
 // ---------------- layout
-test("buildSeats: 6 tables x 4 chairs + 4 sofa seats, unique ids", () => {
+test("buildSeats: 6 tables x 4 chairs + 4 sofa seats + 6 private-table seats, unique ids", () => {
   const seats = buildSeats();
-  assert.equal(seats.length, TABLES.length * 4 + SOFAS.length * 2);
+  assert.equal(seats.length, TABLES.length * 4 + SOFAS.length * 2 + 6);
   assert.equal(new Set(seats.map((s) => s.id)).size, seats.length);
   for (const s of seats) {
     assert.ok(s.exit.x > TILE && s.exit.x < WORLD_W - TILE, `${s.id} exit x in room`);

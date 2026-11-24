@@ -9,7 +9,7 @@ import { unescapeHtml } from "@/shared/text";
 import type { WorldAction, WorldState } from "@/game/worldState";
 import {
   playerOccupant,
-  type GuestbookView, type InitPayload, type Result, type RumourView, type ServerToClient,
+  type GuestbookView, type InitPayload, type OutfitView, type Result, type RumourView, type ServerToClient, type TableInfo,
 } from "@/shared/protocol";
 
 const CLIENT_ID_KEY = "pixelcafe.clientId";
@@ -42,6 +42,12 @@ export class NetClient {
   online: number;
   rumours: RumourView[];
   guestbook: GuestbookView;
+  /** The private table you are sitting at (null when you are not at one). Replaced, never mutated. */
+  table: TableInfo | null;
+  /** Ids of locked private tables (for the padlock drawn on the table). */
+  locks: string[];
+  /** Socket ids wearing today's #1 outfit crown. */
+  crowns: string[];
   closed = false;
   /** socket id -> display name, for everyone we've seen (used by the table game UI). */
   private names = new Map<string, string>();
@@ -57,12 +63,18 @@ export class NetClient {
     this.online = init.online;
     this.rumours = init.rumours;
     this.guestbook = init.guestbook;
+    this.table = init.table;
+    this.locks = init.locks;
+    this.crowns = init.crowns;
     for (const p of init.players) this.names.set(p.id, unescapeHtml(p.name));
 
     socket.on("player:joined", (p: { id: string; name: string }) => this.names.set(p.id, unescapeHtml(p.name)));
     socket.on("online", (p: { count: number }) => { this.online = p.count; this.emit(); });
     socket.on("rumours", (p: RumourView[]) => { this.rumours = p; this.emit(); });
     socket.on("guestbook", (p: GuestbookView) => { this.guestbook = p; this.emit(); });
+    socket.on("table:info", (p: TableInfo | null) => { this.table = p; this.emit(); });
+    socket.on("locks", (p: string[]) => { this.locks = p; this.emit(); });
+    socket.on("crowns", (p: string[]) => { this.crowns = p; this.emit(); });
     socket.on("disconnect", () => {
       this.closed = true;
       this.emit();
@@ -155,6 +167,18 @@ export class NetClient {
   chat(text: string) { return this.ask("chat", { text }); }
   rumourPost(text: string) { return this.ask("rumour:post", { text }); }
   guestbookSign(text: string) { return this.ask("guestbook:sign", { text }); }
+  /** Lock or open the private table you are sitting at. */
+  tableLock(locked: boolean) { return this.ask("table:lock", { locked }); }
+  outfitVote(id: string) { return this.ask("outfit:vote", { id }); }
+  /** Current Fashion Stand: everyone seen in the last 48 hours with today's votes. */
+  outfitList(): Promise<{ ok: true; view: OutfitView } | { ok: false; reason: string }> {
+    return new Promise((resolve) => {
+      if (this.closed) return resolve({ ok: false, reason: "Disconnected from the cafe." });
+      this.socket.timeout(3000).emit("outfit:list", (err: Error | null, res?: { ok: true; view: OutfitView } | { ok: false; reason: string }) => {
+        resolve(err || !res ? { ok: false, reason: "The cafe didn't answer. Try again." } : res);
+      });
+    });
+  }
 
   close() {
     this.closed = true;

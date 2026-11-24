@@ -5,7 +5,7 @@ import { buildSpriteTextures } from "./sprites";
 import { PLAYER_ID, SPAWN, TILE, WORLD_H, WORLD_W, WALL_H } from "./constants";
 import {
   BOARD, COFFEE_TABLE, COUNTER, COUNTER_ZONE, GAME_NPC, GAME_SEAT_PREFIX, GAME_TABLE,
-  GUESTBOOK_SPOT, JUKEBOX_SPOT, SOFAS, TABLES, buildSeats, gameBoardPos, type Seat,
+  GUESTBOOK_SPOT, JUKEBOX_SPOT, OUTFIT_STAND, PRIVATE_TABLES, SOFAS, TABLES, buildSeats, gameBoardPos, privateTableOf, type Seat,
 } from "./layout";
 import { SeatState, mergeRemoteSeats, sitPose } from "./seats";
 import { RemotePlayer } from "./remotePlayers";
@@ -33,6 +33,7 @@ export type CafeCallbacks = {
   onOpenJukebox: () => void;
   onOpenGuestbook: () => void;
   onOpenGame: () => void;
+  onOpenOutfits: () => void;
   onSfx: (name: SfxName) => void;
   onBeans: (amount: number, drinkMade: boolean) => void;
 };
@@ -45,6 +46,7 @@ const NPC_RANGE = 56;
 const BOARD_RANGE = 46;
 const JUKEBOX_RANGE = 40;
 const GUESTBOOK_RANGE = 54;
+const OUTFIT_RANGE = 46;
 const CAT_RANGE = 40;
 const CUP_MS = 60_000;
 
@@ -61,6 +63,7 @@ type Target =
   | { kind: "board" }
   | { kind: "jukebox" }
   | { kind: "guestbook" }
+  | { kind: "outfits" }
   | { kind: "cat" };
 
 export class CafeScene extends Phaser.Scene {
@@ -92,6 +95,9 @@ export class CafeScene extends Phaser.Scene {
   private weather!: WeatherLayer;
   private cat!: Cat;
   private badge!: Phaser.GameObjects.Image;
+  private crown!: Phaser.GameObjects.Image;
+  private selfCrowned = false;
+  private padlocks = new Map<string, Phaser.GameObjects.Image>(); // private table id -> padlock
   private jukeGlow!: Phaser.GameObjects.Image;
   private jukeMood: Mood | null = null;
   private tttTex!: Phaser.Textures.CanvasTexture;
@@ -132,6 +138,7 @@ export class CafeScene extends Phaser.Scene {
     this.createNpcs();
     this.playerCup = new HeldCup(this);
     this.badge = this.add.image(0, 0, "cup_espresso").setVisible(false);
+    this.crown = this.add.image(0, 0, "crown").setVisible(false);
     this.cat = new Cat(this, this.nav, this.bubbles);
     this.weather = new WeatherLayer(this, WORLD_W, WORLD_H);
     this.startJukeboxNotes();
@@ -269,6 +276,28 @@ export class CafeScene extends Phaser.Scene {
       if (i === 3) this.place("laptop", x + 24, y + 12).setDepth(y + 57); // Kai's laptop (lid faces us)
       if (i === GAME_TABLE) this.place("book", x + 8, y + 15).setDepth(y + 57); // Theo's book (he also plays tic-tac-toe)
     });
+
+    // private table (6 seats): one long table, chairs placed from the seat list
+    for (const t of PRIVATE_TABLES) {
+      const seats = this.seatList.filter((s) => privateTableOf(s.id) === t.id);
+      this.place("table_long", t.x, t.y);
+      this.solid(t.x + 6, t.y + 22, t.w - 12, 28);
+      this.lamp(t.x + t.w / 2, t.y);
+      for (const s of seats) {
+        const kind = s.id.slice(t.id.length + 1);
+        if (kind.startsWith("top")) this.place("chair_front", s.x - 12, t.y - 14).setDepth(t.y + 10);
+        else if (kind.startsWith("bottom")) this.place("chair_back", s.x - 12, t.y + 44).setDepth(t.y + 80);
+        else if (kind === "left") this.place("chair_side", s.x - 9, t.y + 18);
+        else this.place("chair_side", s.x - 11, t.y + 18, true);
+      }
+      const lock = this.add.image(t.x + t.w / 2, t.y + 8, "lock_icon").setDepth(t.y + 90).setVisible(false);
+      this.padlocks.set(t.id, lock);
+    }
+
+    // fashion stand (outfit leaderboard)
+    const os = OUTFIT_STAND;
+    this.place("outfit_stand", os.x, os.y);
+    this.solid(os.solid.x, os.solid.y, os.solid.w, os.solid.h);
 
     // lounge: two sofas around a coffee table on the rug
     const [sofaA, sofaB] = SOFAS;
@@ -485,6 +514,8 @@ export class CafeScene extends Phaser.Scene {
     if (jd <= JUKEBOX_RANGE) offer(jd, { kind: "jukebox" });
     const gd = Math.hypot(px - GUESTBOOK_SPOT.spot.x, py - GUESTBOOK_SPOT.spot.y);
     if (gd <= GUESTBOOK_RANGE) offer(gd + 8, { kind: "guestbook" });
+    const od = Math.hypot(px - OUTFIT_STAND.spot.x, py - OUTFIT_STAND.spot.y);
+    if (od <= OUTFIT_RANGE) offer(od + 4, { kind: "outfits" });
     const cd = Math.hypot(px - this.cat.x, py - this.cat.y);
     if (cd <= CAT_RANGE) offer(cd - 6, { kind: "cat" }); // the cat is small and cute: it wins ties
     return best ? (best as { score: number; t: Target }).t : null;
@@ -495,10 +526,16 @@ export class CafeScene extends Phaser.Scene {
   }
 
   private promptFor(t: Target | null): string {
-    if (this.seated) return this.atGameTable() ? "Press E to play Tic-Tac-Toe\nMove to stand up" : "Press E to stand";
+    if (this.seated) {
+      if (this.atGameTable()) return "Press E to play Tic-Tac-Toe\nMove to stand up";
+      if (privateTableOf(this.seated.id)) return "Private Table: chat stays at this table\nPress E to stand";
+      return "Press E to stand";
+    }
     if (!t) return "";
     switch (t.kind) {
-      case "seat": return t.seat.id.startsWith(GAME_SEAT_PREFIX) ? "Press E to sit and play Tic-Tac-Toe" : "Press E to sit";
+      case "seat":
+        if (t.seat.id.startsWith(GAME_SEAT_PREFIX)) return "Press E to sit and play Tic-Tac-Toe";
+        return privateTableOf(t.seat.id) ? "Press E to join the Private Table (up to 6)" : "Press E to sit";
       case "npc": {
         const talk = `Press E to talk to ${t.npc.spec.name}`;
         return this.playerCup.visible && this.playerCup.kind ? `${talk}\nPress G to gift your ${drinkName(this.playerCup.kind)}` : talk;
@@ -507,6 +544,7 @@ export class CafeScene extends Phaser.Scene {
       case "board": return "Press E to read the rumours";
       case "jukebox": return "Press E to use the jukebox";
       case "guestbook": return "Press E to open the guestbook";
+      case "outfits": return "Press E to view the Outfit Board";
       case "cat": return "Press E to pet Biscuit";
     }
   }
@@ -520,6 +558,7 @@ export class CafeScene extends Phaser.Scene {
       case "board": this.sfx("interact"); cb?.onOpenBoard(); break;
       case "jukebox": this.sfx("jukebox"); cb?.onOpenJukebox(); break;
       case "guestbook": this.sfx("page"); cb?.onOpenGuestbook(); break;
+      case "outfits": this.sfx("page"); cb?.onOpenOutfits(); break;
       case "cat": this.petCat(); break;
     }
   }
@@ -776,6 +815,8 @@ export class CafeScene extends Phaser.Scene {
     mergeRemoteSeats(this.seats, init.seats, this.selfOcc, (id) => this.evictNpc(id));
     for (const p of init.players) this.addRemote(p);
     this.refreshRemoteSeats();
+    this.showLocks(init.locks);
+    this.showCrowns(init.crowns);
 
     this.offNet.push(
       net.on("player:joined", (p) => { this.addRemote(p); this.refreshRemoteSeats(); }),
@@ -807,14 +848,27 @@ export class CafeScene extends Phaser.Scene {
         }
       }),
       net.on("world", (state) => this.world.load(state)),
+      net.on("locks", (ids) => this.showLocks(ids)),
+      net.on("crowns", (ids) => this.showCrowns(ids)),
       net.onClose(() => this.goSolo()),
     );
+  }
+
+  private showLocks(ids: string[]) {
+    for (const [id, img] of this.padlocks) img.setVisible(ids.includes(id));
+  }
+
+  private showCrowns(ids: string[]) {
+    this.selfCrowned = !!this.net && ids.includes(this.net.selfId);
+    for (const [id, r] of this.remotes) r.setCrowned(ids.includes(id));
   }
 
   private addRemote(p: PlayerState) {
     if (p.id === this.net?.selfId) return;
     this.remotes.get(p.id)?.destroy();
-    this.remotes.set(p.id, new RemotePlayer(this, p));
+    const r = new RemotePlayer(this, p);
+    r.setCrowned(!!this.net?.crowns.includes(p.id));
+    this.remotes.set(p.id, r);
   }
 
   /** Make each remote player sit in the chair the server says they are in. */
@@ -846,6 +900,8 @@ export class CafeScene extends Phaser.Scene {
   private goSolo() {
     if (!this.net || this.shuttingDown) return;
     this.net = null;
+    this.selfCrowned = false;
+    this.showLocks([]);
     this.offNet.forEach((f) => f());
     this.offNet = [];
     this.remotes.forEach((r) => { this.bubbles.clear(r.id); r.destroy(); });
@@ -898,6 +954,12 @@ export class CafeScene extends Phaser.Scene {
         .setPosition(Math.round(this.label.x - this.label.width / 2 - 6), Math.round(this.label.y - this.label.height / 2))
         .setDepth(80001);
     } else this.badge.setVisible(false);
+    if (this.selfCrowned) {
+      this.crown
+        .setVisible(true)
+        .setPosition(Math.round(this.label.x + this.label.width / 2 + 7), Math.round(this.label.y - this.label.height / 2) - 1)
+        .setDepth(80001);
+    } else this.crown.setVisible(false);
     const handY = artTop + (maxY - minY + 1) * 0.62;
     this.playerCup.follow(this.avatar.x + (this.avatar.flipX ? -9 : 9), handY, this.avatar.depth + 1, time);
   }

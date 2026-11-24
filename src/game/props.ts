@@ -1,5 +1,5 @@
 import * as Phaser from "phaser";
-import { make, rect, type Ctx } from "./art";
+import { ellipse, make, rect, type Ctx } from "./art";
 
 // Textures for the Phase 3.5 props: jukebox, cafe cat, guestbook, window skies, rain drops.
 // (All drawn in code, same as the rest of the art.)
@@ -105,7 +105,76 @@ function sky(top: string, bottom: string, draw: (c: Ctx) => void) {
   };
 }
 
+// ------------------------------------------------- Phase 5: private table, fashion stand, crown, padlock
+
+/** The 6-seat private table: a long oval with a candle and a little "reserved" card. */
+function drawTableLong(c: Ctx) {
+  ellipse(c, "#00000040", 48, 46, 46, 8);
+  rect(c, "#4a3222", 20, 34, 8, 16);
+  rect(c, "#4a3222", 68, 34, 8, 16);
+  rect(c, "#33200f", 12, 48, 24, 4);
+  rect(c, "#33200f", 60, 48, 24, 4);
+  ellipse(c, "#4a2f4a", 48, 25, 47, 17); // plum-coloured rim so it reads as "private"
+  ellipse(c, "#8a6a9a", 48, 22, 47, 17);
+  ellipse(c, "#a888b8", 48, 21, 44, 14);
+  // candle + two cups
+  rect(c, "#fff6e0", 46, 14, 4, 7);
+  rect(c, "#f2a93b", 47, 11, 2, 3);
+  rect(c, "#f2c36b", 47, 10, 2, 1);
+  ellipse(c, "#f4e4c1", 28, 23, 5, 3);
+  rect(c, "#fff6e0", 26, 18, 5, 5);
+  ellipse(c, "#f4e4c1", 68, 23, 5, 3);
+  rect(c, "#fff6e0", 66, 18, 5, 5);
+}
+
+/** Mannequin on a stand with a little star banner: the Fashion Stand. */
+function drawOutfitStand(c: Ctx) {
+  ellipse(c, "#00000040", 20, 52, 16, 4);
+  rect(c, "#33200f", 8, 48, 24, 4); // base
+  rect(c, "#4a2f1d", 10, 46, 20, 3);
+  rect(c, "#8a6446", 19, 22, 2, 25); // pole
+  // mannequin torso (a plain little top) and head
+  rect(c, "#e8d8b8", 14, 8, 12, 14);
+  rect(c, "#d9c8a0", 14, 18, 12, 4);
+  rect(c, "#e8d8b8", 11, 9, 3, 6);
+  rect(c, "#e8d8b8", 26, 9, 3, 6);
+  rect(c, "#e8d8b8", 17, 3, 6, 6);
+  rect(c, "#c8438f", 14, 12, 12, 3); // sash
+  // banner with a star
+  rect(c, "#2a1a11", 2, 0, 1, 12);
+  rect(c, "#f2a93b", 3, 1, 8, 9);
+  rect(c, "#fff6e0", 6, 3, 2, 5);
+  rect(c, "#fff6e0", 4, 5, 6, 1);
+  rect(c, "#2a1a11", 30, 0, 1, 10);
+  rect(c, "#7fc8a9", 31, 1, 8, 7);
+  rect(c, "#fff6e0", 34, 3, 2, 3);
+}
+
+function drawCrown(c: Ctx) {
+  rect(c, "#8a5a10", 0, 5, 9, 1);
+  rect(c, "#f2c36b", 0, 2, 9, 3);
+  rect(c, "#f2c36b", 0, 0, 1, 3);
+  rect(c, "#f2c36b", 4, 0, 1, 3);
+  rect(c, "#f2c36b", 8, 0, 1, 3);
+  rect(c, "#fff3a6", 1, 3, 1, 1);
+  rect(c, "#d9304a", 4, 3, 1, 1);
+  rect(c, "#7fc8a9", 7, 3, 1, 1);
+}
+
+function drawLock(c: Ctx) {
+  rect(c, "#2a1a11", 2, 0, 6, 6);
+  rect(c, "#c8c0b0", 3, 1, 4, 5);
+  rect(c, "#2a1a11", 4, 2, 2, 4);
+  rect(c, "#2a1a11", 0, 4, 10, 8);
+  rect(c, "#f2a93b", 1, 5, 8, 6);
+  rect(c, "#2a1a11", 4, 7, 2, 3);
+}
+
 export function buildPropTextures(scene: Phaser.Scene) {
+  make(scene, "table_long", 96, 56, drawTableLong);
+  make(scene, "outfit_stand", 40, 56, drawOutfitStand);
+  make(scene, "crown", 9, 6, drawCrown);
+  make(scene, "lock_icon", 10, 12, drawLock);
   make(scene, "jukebox", JUKEBOX.w, JUKEBOX.h, drawJukebox);
   make(scene, "cat_walk1", CAT.w, CAT.h, drawCatWalk(0));
   make(scene, "cat_walk2", CAT.w, CAT.h, drawCatWalk(1));

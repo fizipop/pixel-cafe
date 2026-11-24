@@ -1,0 +1,195 @@
+// Persistence for the shared boards: rumours, guestbook and outfit votes.
+//
+// The rest of the server only talks to the `Repository` interface, so moving to Supabase later
+// means writing one more class that implements it (the methods are the whole API). Two
+// implementations live here:
+//   MemoryRepository    - plain in-memory (tests, and the default when no file is given)
+//   JsonFileRepository  - the same, plus a debounced atomic write to a local JSON file
+//                         (server/data.json by default, gitignored)
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+
+export type RumourRecord = { id: string; text: string; createdAt: number; author: string };
+export type GuestRecord = { id: string; name: string; text: string; createdAt: number; author: string };
+export type OutfitRecord = { id: string; clientId: string; name: string; pixels: string[]; lastSeen: number };
+export type VoteRecord = { day: string; voter: string; target: string }; // client ids; one vote per voter per day
+
+export interface Repository {
+  // rumours (newest first)
+  listRumours(): RumourRecord[];
+  addRumour(r: RumourRecord, cap: number): void;
+  removeRumours(ids: string[]): void;
+  rumourLikes(id: string): string[];
+  setRumourLike(id: string, clientId: string, liked: boolean): void;
+  // guestbook (newest first)
+  listGuestbook(): GuestRecord[];
+  addGuestEntry(e: GuestRecord, cap: number): void;
+  lastSignDay(clientId: string): string | undefined;
+  setLastSignDay(clientId: string, day: string): void;
+  // outfit leaderboard
+  listOutfits(): OutfitRecord[];
+  upsertOutfit(o: OutfitRecord): void;
+  removeOutfitsSeenBefore(cutoff: number): void;
+  listVotes(day: string): VoteRecord[];
+  addVote(v: VoteRecord): void;
+  removeVotesBefore(day: string): void;
+  /** Write anything pending to durable storage (no-op for memory). */
+  flush(): void;
+}
+
+export type PersistedData = {
+  version: 1;
+  rumours: RumourRecord[];
+  rumourLikes: Record<string, string[]>;
+  guestbook: GuestRecord[];
+  guestbookDays: Record<string, string>;
+  outfits: Record<string, OutfitRecord>; // by client id
+  votes: VoteRecord[];
+};
+
+export const emptyData = (): PersistedData => ({
+  version: 1, rumours: [], rumourLikes: {}, guestbook: [], guestbookDays: {}, outfits: {}, votes: [],
+});
+
+const isStr = (v: unknown): v is string => typeof v === "string";
+const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const list = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+
+/** Turn whatever was on disk into valid data, dropping anything malformed (never throws). */
+export function sanitizeData(raw: unknown): PersistedData {
+  const out = emptyData();
+  if (!isObj(raw)) return out;
+  for (const r of list(raw.rumours)) {
+    if (isObj(r) && isStr(r.id) && isStr(r.text) && isNum(r.createdAt) && isStr(r.author)) out.rumours.push({ id: r.id, text: r.text, createdAt: r.createdAt, author: r.author });
+  }
+  if (isObj(raw.rumourLikes)) {
+    for (const [id, who] of Object.entries(raw.rumourLikes)) out.rumourLikes[id] = list(who).filter(isStr);
+  }
+  for (const g of list(raw.guestbook)) {
+    if (isObj(g) && isStr(g.id) && isStr(g.name) && isStr(g.text) && isNum(g.createdAt) && isStr(g.author)) out.guestbook.push({ id: g.id, name: g.name, text: g.text, createdAt: g.createdAt, author: g.author });
+  }
+  if (isObj(raw.guestbookDays)) {
+    for (const [id, day] of Object.entries(raw.guestbookDays)) if (isStr(day)) out.guestbookDays[id] = day;
+  }
+  if (isObj(raw.outfits)) {
+    for (const o of Object.values(raw.outfits)) {
+      if (isObj(o) && isStr(o.id) && isStr(o.clientId) && isStr(o.name) && isNum(o.lastSeen) && Array.isArray(o.pixels) && o.pixels.length === 1024 && o.pixels.every(isStr)) {
+        out.outfits[o.clientId] = { id: o.id, clientId: o.clientId, name: o.name, pixels: o.pixels as string[], lastSeen: o.lastSeen };
+      }
+    }
+  }
+  for (const v of list(raw.votes)) {
+    if (isObj(v) && isStr(v.day) && isStr(v.voter) && isStr(v.target)) out.votes.push({ day: v.day, voter: v.voter, target: v.target });
+  }
+  return out;
+}
+
+export class MemoryRepository implements Repository {
+  protected data: PersistedData;
+
+  constructor(initial: PersistedData = emptyData()) {
+    this.data = initial;
+  }
+
+  /** Called after every mutation; the file repository uses it to schedule a save. */
+  protected changed(): void {}
+
+  listRumours() { return this.data.rumours; }
+  addRumour(r: RumourRecord, cap: number) {
+    this.data.rumours.unshift(r);
+    if (this.data.rumours.length > cap) this.removeRumours(this.data.rumours.slice(cap).map((x) => x.id));
+    this.changed();
+  }
+  removeRumours(ids: string[]) {
+    if (ids.length === 0) return;
+    const gone = new Set(ids);
+    this.data.rumours = this.data.rumours.filter((r) => !gone.has(r.id));
+    for (const id of ids) delete this.data.rumourLikes[id];
+    this.changed();
+  }
+  rumourLikes(id: string) { return this.data.rumourLikes[id] ?? []; }
+  setRumourLike(id: string, clientId: string, liked: boolean) {
+    const set = new Set(this.data.rumourLikes[id] ?? []);
+    if (liked) set.add(clientId); else set.delete(clientId);
+    this.data.rumourLikes[id] = [...set];
+    this.changed();
+  }
+
+  listGuestbook() { return this.data.guestbook; }
+  addGuestEntry(e: GuestRecord, cap: number) {
+    this.data.guestbook.unshift(e);
+    if (this.data.guestbook.length > cap) this.data.guestbook.length = cap;
+    this.changed();
+  }
+  lastSignDay(clientId: string) { return this.data.guestbookDays[clientId]; }
+  setLastSignDay(clientId: string, day: string) {
+    this.data.guestbookDays[clientId] = day;
+    this.changed();
+  }
+
+  listOutfits() { return Object.values(this.data.outfits); }
+  upsertOutfit(o: OutfitRecord) {
+    this.data.outfits[o.clientId] = o;
+    this.changed();
+  }
+  removeOutfitsSeenBefore(cutoff: number) {
+    let any = false;
+    for (const [k, o] of Object.entries(this.data.outfits)) if (o.lastSeen < cutoff) { delete this.data.outfits[k]; any = true; }
+    if (any) this.changed();
+  }
+  listVotes(day: string) { return this.data.votes.filter((v) => v.day === day); }
+  addVote(v: VoteRecord) {
+    this.data.votes.push(v);
+    this.changed();
+  }
+  removeVotesBefore(day: string) {
+    const keep = this.data.votes.filter((v) => v.day >= day); // "YYYY-MM-DD" sorts as text
+    if (keep.length === this.data.votes.length) return;
+    this.data.votes = keep;
+    this.changed();
+  }
+
+  flush() {}
+}
+
+export class JsonFileRepository extends MemoryRepository {
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private file: string;
+  private debounceMs: number;
+
+  constructor(file: string, debounceMs = 300) {
+    super(JsonFileRepository.read(file));
+    this.file = file;
+    this.debounceMs = debounceMs;
+  }
+
+  private static read(file: string): PersistedData {
+    if (!existsSync(file)) return emptyData();
+    try {
+      return sanitizeData(JSON.parse(readFileSync(file, "utf8")));
+    } catch (err) {
+      // keep the unreadable file for inspection instead of silently overwriting it
+      const backup = `${file}.corrupt-${Date.now()}`;
+      try { renameSync(file, backup); } catch { /* ignore */ }
+      console.error(`Could not read ${file} (${(err as Error).message}). Moved it to ${backup} and starting empty.`);
+      return emptyData();
+    }
+  }
+
+  protected override changed() {
+    if (this.timer) return;
+    this.timer = setTimeout(() => this.flush(), this.debounceMs);
+    this.timer.unref?.();
+  }
+
+  override flush() {
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    try {
+      const tmp = `${this.file}.tmp`;
+      writeFileSync(tmp, JSON.stringify(this.data));
+      renameSync(tmp, this.file); // atomic: a crash mid-write never leaves half a file
+    } catch (err) {
+      console.error(`Could not save ${this.file}:`, err);
+    }
+  }
+}

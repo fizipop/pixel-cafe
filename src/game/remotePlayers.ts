@@ -19,6 +19,7 @@ export class RemotePlayer {
   private shadow: Phaser.GameObjects.Image;
   private label: Phaser.GameObjects.Text;
   private badge: Phaser.GameObjects.Image;
+  private crown: Phaser.GameObjects.Image;
   private cup: HeldCup;
   private art = { minY: 8, maxY: 31 };
 
@@ -50,8 +51,14 @@ export class RemotePlayer {
       .setOrigin(0.5, 1)
       .setResolution(3);
     this.badge = scene.add.image(0, 0, "cup_espresso").setVisible(false);
+    this.crown = scene.add.image(0, 0, "crown").setVisible(false);
     this.cup = new HeldCup(scene);
     this.setDrink(s.drink);
+  }
+
+  /** Wearing today's #1 outfit: a small crown beside the name tag. */
+  setCrowned(on: boolean) {
+    this.crown.setVisible(on);
   }
 
   /** Where chat bubbles and emotes float: just above the name. */
@@ -142,6 +149,9 @@ export class RemotePlayer {
         .setPosition(Math.round(this.label.x - this.label.width / 2 - 6), Math.round(this.label.y - this.label.height / 2))
         .setDepth(80001);
     } else this.badge.setVisible(false);
+    if (this.crown.visible) {
+      this.crown.setPosition(Math.round(this.label.x + this.label.width / 2 + 7), Math.round(this.label.y - this.label.height / 2) - 1).setDepth(80001);
+    }
     const handY = artTop + (maxY - minY + 1) * 0.62;
     this.cup.follow(this.img.x + (this.img.flipX ? -9 : 9), handY, this.img.depth + 1, time);
   }
@@ -151,6 +161,7 @@ export class RemotePlayer {
     this.shadow.destroy();
     this.label.destroy();
     this.badge.destroy();
+    this.crown.destroy();
     this.cup.hide();
     this.cup.destroy();
     if (this.scene.textures.exists(this.texKey)) this.scene.textures.remove(this.texKey);

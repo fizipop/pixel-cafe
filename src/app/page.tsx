@@ -42,7 +42,7 @@ const CUP = [
 const FEATURES = [
   { title: "Draw yourself", text: "No presets. Paint your own pixel character in a real pixel editor, and keep as many outfits as you like." },
   { title: "Stay anonymous", text: "You get a random name like MistyMuffin472. No real name, no photo, no profile to curate." },
-  { title: "Hang out", text: "Walk around with other real people, chat with whoever is nearby, make a drink, change the music and weather together, play Tic-Tac-Toe and sign the guestbook." },
+  { title: "Hang out", text: "Walk around with other real people, chat with whoever is nearby, make a drink, change the music and weather together, play Tic-Tac-Toe, sign the guestbook, claim a private table with friends and vote for the best outfit of the day." },
 ];
 
 const ROADMAP = [
@@ -53,9 +53,10 @@ const ROADMAP = [
   { name: "Tic-Tac-Toe, guestbook & the cafe cat", status: "Open now" },
   { name: "Multiplayer: meet real people, live", status: "Open now" },
   { name: "Proximity Chat: talk to people nearby", status: "Open now" },
-  { name: "Rumour Board (shared live, 48h)", status: "Open now" },
-  { name: "Private Lounge", status: "Soon" },
-  { name: "Arcade & Outfit Leaderboard", status: "Later" },
+  { name: "Rumour Board & Guestbook (shared live, saved on the server, rumours fade after 48h)", status: "Open now" },
+  { name: "Private Tables: up to 6 seats, private table chat, open or lock it", status: "Open now" },
+  { name: "Outfit Leaderboard: daily upvotes & a crown for the top outfit", status: "Open now" },
+  { name: "Arcade", status: "Later" },
   { name: "Voice Lounge", status: "Someday" },
 ];
 

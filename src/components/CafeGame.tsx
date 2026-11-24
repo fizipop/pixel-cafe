@@ -19,12 +19,14 @@ import JukeboxMenu from "./JukeboxMenu";
 import TableGame from "./TableGame";
 import Guestbook from "./Guestbook";
 import ChatPanel from "./ChatPanel";
+import OutfitBoard from "./OutfitBoard";
+import TableStatus from "./TableStatus";
 import { NetClient } from "@/net/client";
 import { localGuestbook, localRumours, netGuestbook, netRumours } from "@/net/stores";
 
 const AUDIO_KEY = "pixelcafe.audio.v1";
 
-type Modal = null | "board" | "order" | "jukebox" | "guestbook" | "game";
+type Modal = null | "board" | "order" | "jukebox" | "guestbook" | "game" | "outfits";
 
 function loadAudioPrefs(): { volume: number; muted: boolean; sfx: boolean } {
   try {
@@ -124,6 +126,7 @@ export default function CafeGame() {
           onOpenJukebox: () => setModal("jukebox"),
           onOpenGuestbook: () => setModal("guestbook"),
           onOpenGame: () => setModal("game"),
+          onOpenOutfits: () => setModal("outfits"),
           onSfx: (n) => sfxRef.current?.play(n),
           onBeans: (n, made) => setBeans(addBeans(n, made).beans),
         },
@@ -266,6 +269,10 @@ export default function CafeGame() {
         >
           {chars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
+        <button className="px-btn secondary !py-1" onClick={(e) => { setModal("outfits"); e.currentTarget.blur(); }} title="See outfits and upvote your favourite">
+          👑 Outfits
+        </button>
+        <TableStatus net={net} />
         <div className="flex gap-3">
           <Link href="/create" className="text-latte underline">Edit</Link>
           <Link href="/" className="text-latte underline">Leave</Link>
@@ -316,6 +323,7 @@ export default function CafeGame() {
         />
       )}
       {modal === "jukebox" && <JukeboxMenu world={world} onClose={closeModal} sfx={playSfx} />}
+      {modal === "outfits" && <OutfitBoard net={net && !net.closed ? net : null} onClose={closeModal} sfx={playSfx} />}
       {modal === "guestbook" && <Guestbook username={username} source={bookSource} onClose={closeModal} sfx={playSfx} />}
       {modal === "game" && <TableGame world={world} me={net?.occupant ?? PLAYER_ID} nameOf={net ? (o) => net.nameOf(o) : undefined} onClose={closeModal} sfx={playSfx} />}
     </div>

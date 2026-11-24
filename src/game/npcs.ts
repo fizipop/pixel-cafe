@@ -1,7 +1,7 @@
 import * as Phaser from "phaser";
 import type { NavGrid, Point } from "./pathing";
 import { SeatState, sitPose } from "./seats";
-import type { Seat } from "./layout";
+import { privateTableOf, type Seat } from "./layout";
 import type { Bubbles } from "./bubbles";
 import { HeldCup, type DrinkKind } from "./heldCup";
 
@@ -359,7 +359,7 @@ export class Npc {
         this.mode = "stand";
         this.wTimer -= dt;
         if (this.wTimer <= 0 && time >= this.busyUntil) {
-          const free = [...this.w.seatMap.values()].filter((s) => s.kind === "chair" && this.w.seats.isFree(s.id));
+          const free = [...this.w.seatMap.values()].filter((s) => s.kind === "chair" && !privateTableOf(s.id) && this.w.seats.isFree(s.id));
           for (let tries = 0; tries < 4 && free.length; tries++) {
             const seat = free.splice(Math.floor(Math.random() * free.length), 1)[0];
             if (!this.startPath(seat.exit)) continue;

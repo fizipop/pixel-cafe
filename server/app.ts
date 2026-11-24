@@ -52,6 +52,9 @@ export function createCafeServer(opts: { origins?: string[]; room?: RoomOptions 
     socket.on("rumour:post", safe((d, ack) => reply(ack, room.rumourPost(id, d))));
     socket.on("rumour:like", safe((d) => room.rumourLike(id, d)));
     socket.on("guestbook:sign", safe((d, ack) => reply(ack, room.guestbookSign(id, d))));
+    socket.on("table:lock", safe((d, ack) => reply(ack, room.tableLock(id, d))));
+    socket.on("outfit:list", safe((ack) => reply(ack, room.outfitList(id))));
+    socket.on("outfit:vote", safe((d, ack) => reply(ack, room.outfitVote(id, d))));
     socket.on("disconnect", safe(() => room.leave(id)));
   });
 
@@ -64,6 +67,7 @@ export function createCafeServer(opts: { origins?: string[]; room?: RoomOptions 
     room, http, io,
     close: () => new Promise<void>((resolve) => {
       timers.forEach(clearInterval);
+      room.repo.flush(); // make sure the last votes/posts reach disk
       void io.close(() => resolve());
     }),
   };

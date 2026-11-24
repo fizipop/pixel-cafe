@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local server data (Phase 5)
+/server/data.json
+/server/data.json.tmp
+/server/data.json.corrupt-*

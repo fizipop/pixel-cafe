@@ -4,7 +4,7 @@ import type { NetClient } from "@/net/client";
 import { CHAT_MAX } from "@/shared/protocol";
 import { unescapeHtml } from "@/shared/text";
 
-type Line = { id: number; kind: "chat" | "system"; name?: string; text: string; mine?: boolean };
+type Line = { id: number; kind: "chat" | "system"; name?: string; text: string; mine?: boolean; table?: boolean };
 type Toast = { id: number; text: string };
 
 const LOG_MAX = 60;
@@ -30,6 +30,9 @@ export default function ChatPanel({
   // a dropped connection counts as "offline", same as no server at all
   const dropped = useSyncExternalStore(netProp ? netProp.subscribe : noopSubscribe, () => !!netProp?.closed, () => false);
   const net = netProp && !dropped ? netProp : null;
+  // the private table you are seated at (chat is isolated to it), straight from the server
+  const table = useSyncExternalStore(netProp ? netProp.subscribe : noopSubscribe, () => (netProp?.table ?? null), () => null);
+  const atTable = !!net && !!table;
   const [typing, setTyping] = useState(false);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
@@ -68,16 +71,28 @@ export default function ChatPanel({
     return () => window.removeEventListener("keydown", onKey, true);
   }, [typing, disabled, net]);
 
+  const push = useCallback((l: Omit<Line, "id">) => {
+    setLines((cur) => [...cur.slice(-(LOG_MAX - 1)), { ...l, id: seq.current++ }]);
+    if (collapsedRef.current) setUnread((n) => n + 1);
+  }, []);
+
+  // say what changed when you sit down at / leave / lock a private table
+  const prevTable = useRef<{ id: string | null; locked: boolean }>({ id: null, locked: false });
+  useEffect(() => {
+    const prev = prevTable.current;
+    const now = { id: table?.id ?? null, locked: !!table?.locked };
+    prevTable.current = now;
+    if (now.id && now.id !== prev.id) push({ kind: "system", text: "You joined a Private Table. Chat here is only seen by people seated at this table." });
+    else if (!now.id && prev.id) push({ kind: "system", text: "You left the Private Table. You're back in nearby chat." });
+    else if (now.id && now.locked !== prev.locked) push({ kind: "system", text: now.locked ? "Table locked: nobody new can sit down." : "Table opened: others can join your table." });
+  }, [table, push]);
+
   // incoming chat + system lines
   useEffect(() => {
     if (!net) return;
-    const push = (l: Omit<Line, "id">) => {
-      setLines((cur) => [...cur.slice(-(LOG_MAX - 1)), { ...l, id: seq.current++ }]);
-      if (collapsedRef.current) setUnread((n) => n + 1);
-    };
     const offChat = net.on("chat", (m) => {
       const mine = m.from === net.selfId;
-      push({ kind: "chat", name: mine ? "You" : unescapeHtml(m.name), text: unescapeHtml(m.text), mine });
+      push({ kind: "chat", name: mine ? "You" : unescapeHtml(m.name), text: unescapeHtml(m.text), mine, table: m.scope === "table" });
     });
     const offSys = net.on("system", ({ text: raw }) => {
       const t = unescapeHtml(raw);
@@ -88,7 +103,7 @@ export default function ChatPanel({
       setTimeout(() => setToasts((cur) => cur.filter((x) => x.id !== id)), 4500);
     });
     return () => { offChat(); offSys(); };
-  }, [net]);
+  }, [net, push]);
 
   useEffect(() => {
     const el = logRef.current;
@@ -118,7 +133,7 @@ export default function ChatPanel({
         ))}
       </div>
 
-      {/* nearby chat log */}
+      {/* chat log: nearby chat, or your private table's chat while seated */}
       <div className="absolute bottom-3 left-3 z-10 w-72 max-w-[42vw]">
         <button
           className="px-btn secondary w-full !py-1 text-left"
@@ -126,16 +141,17 @@ export default function ChatPanel({
           aria-expanded={!collapsed}
           aria-controls="chat-log"
         >
-          {collapsed ? "▸" : "▾"} Nearby chat{collapsed && unread > 0 ? ` (${unread} new)` : ""}
+          {collapsed ? "▸" : "▾"} {atTable ? "🔒 Private table chat" : "Nearby chat"}{collapsed && unread > 0 ? ` (${unread} new)` : ""}
         </button>
         {!collapsed && (
-          <ul id="chat-log" ref={logRef} className="mt-1 max-h-40 min-h-12 overflow-y-auto bg-espresso/85 p-2 text-lg leading-tight" aria-label="Nearby chat">
-            {lines.length === 0 && <li className="text-bark">{net ? "Say hi! Only people near you can hear." : "Chat needs the server (npm run dev:all)."}</li>}
+          <ul id="chat-log" ref={logRef} className="mt-1 max-h-40 min-h-12 overflow-y-auto bg-espresso/85 p-2 text-lg leading-tight" aria-label={atTable ? "Private table chat" : "Nearby chat"}>
+            {lines.length === 0 && <li className="text-bark">{net ? (atTable ? "Only the people seated at your table can see this." : "Say hi! Only people near you can hear.") : "Chat needs the server (npm run dev:all)."}</li>}
             {lines.map((l) =>
               l.kind === "system" ? (
                 <li key={l.id} className="text-latte opacity-70">· {l.text}</li>
               ) : (
                 <li key={l.id} className="break-words text-cream">
+                  {l.table && <span className="text-amber" title="Private table message">🔒 </span>}
                   <b className={l.mine ? "text-amber" : "text-mint"}>{l.name}:</b> {l.text}
                 </li>
               ),
@@ -147,13 +163,14 @@ export default function ChatPanel({
       {/* chat bar */}
       <div className="absolute bottom-14 left-1/2 z-10 w-[min(34rem,92vw)] -translate-x-1/2">
         {typing ? (
-          <div className="px-panel flex items-center gap-2 !p-2" role="group" aria-label="Chat">
+          <div className="px-panel flex items-center gap-2 !p-2" role="group" aria-label={atTable ? "Private table chat" : "Chat"}>
+            {atTable && <span className="whitespace-nowrap text-amber" title="Only people seated at this table see your messages">🔒 Table</span>}
             <input
               ref={inputRef}
               className="px-input !border-0 !bg-transparent !p-1"
               value={text}
               maxLength={CHAT_MAX}
-              placeholder={net ? "Say something nice..." : "Chat is offline"}
+              placeholder={net ? (atTable ? "Message your table..." : "Say something nice...") : "Chat is offline"}
               disabled={!net}
               aria-label="Chat message"
               onChange={(e) => { setText(e.target.value); setError(""); }}
@@ -170,7 +187,7 @@ export default function ChatPanel({
             className="mx-auto block bg-espresso/80 px-4 py-1 text-latte hover:text-cream"
             onClick={(e) => { if (net && !disabled) setTyping(true); e.currentTarget.blur(); }}
           >
-            {net ? "Press Enter to type" : "Chat is offline (server not running)"}
+            {net ? (atTable ? "🔒 Press Enter to chat with your table" : "Press Enter to type") : "Chat is offline (server not running)"}
           </button>
         )}
         {typing && (
