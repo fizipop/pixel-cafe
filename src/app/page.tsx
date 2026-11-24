@@ -56,13 +56,19 @@ const ROADMAP = [
   { name: "Rumour Board & Guestbook (shared live, saved on the server, rumours fade after 48h)", status: "Open now" },
   { name: "Private Tables: up to 6 seats, private table chat, open or lock it", status: "Open now" },
   { name: "Outfit Leaderboard: daily upvotes & a crown for the top outfit", status: "Open now" },
-  { name: "Floor 2 · Arcade: take the elevator up to a neon carpet room with its own chiptune music", status: "Open now" },
+  { name: "Floor 2 · Arcade: take the elevator up to a neon carpet room with its own chiptune music, eight cabinets and four tables", status: "Open now" },
   { name: "Blackjack table: Hit, Stand & Double Down against the house, alone or with other players", status: "Open now" },
   { name: "Roulette table: one live wheel for everyone seated or watching, red/black, odd/even or a number", status: "Open now" },
   { name: "Pixel Slots: 3 reels of coffee cups, croissants, golden beans, pixel cats and 7s", status: "Open now" },
   { name: "Cafe Mines: a 5×5 board of spilled coffee, build the multiplier and cash out", status: "Open now" },
   { name: "To the Moon: a shared rocket, cash out before it fizzles", status: "Open now" },
-  { name: "Cat Ice Jump: a playable arcade cabinet, plus Leaderboards for top runs, biggest multipliers and richest beans", status: "Open now" },
+  { name: "Penguin Cross: step a pixel penguin across cracking ice for a bigger multiplier each tile, and cash out before the ice gives way (pick calm, thin or cracked ice)", status: "Open now" },
+  { name: "Texas Hold'em Poker: No-Limit for 2 to 6 seats with real blinds, flop, turn and river, a turn timer, side pots, and house bots so you can play solo", status: "Open now" },
+  { name: "Pixel Fighter II: a side-view 1v1 arcade fighter with four fighters, light and heavy attacks, blocking, fireballs and dashes. Climb the CPU ladder or fight another player live", status: "Open now" },
+  { name: "8-Ball Pool: top-down billiards with drag-to-aim cue and power, solids and stripes, against a bot or the person on the other stool, with an optional friendly Cafe Bean stake", status: "Open now" },
+  { name: "Neon Drift GP: a top-down three-lap circuit race with turbo pads, oil slicks and drifting, against three CPU racers. Podium finishes pay beans and your fastest lap is saved", status: "Open now" },
+  { name: "Beat Battle: four falling arrows synced to a chiptune beat, Sick / Good / Miss timing, combos and a tug-of-war with a rival DJ. Ranks S to D pay beans and save your high score", status: "Open now" },
+  { name: "Arcade Leaderboards: top Penguin Cross cash-outs, fastest Neon Drift laps, Beat Battle high scores, Pixel Fighter win streaks, biggest To the Moon multipliers and richest beans", status: "Open now" },
   { name: "Floor 3 · Rooftop Lounge: pick any floor from the elevator, then step out under fairy lights and a twinkling night skyline, with its own cozy piano, breeze and rain soundtrack", status: "Open now" },
   { name: "Campfire & marshmallows: sit on a log by the fire and roast one golden-brown (don't burn it) for a few bonus Cafe Beans", status: "Open now" },
   { name: "Stargazing telescope: named constellations, shooting stars and anonymous wishes for other stargazers to read", status: "Open now" },
@@ -71,7 +77,7 @@ const ROADMAP = [
 ];
 
 const ARCADE_NOTE =
-  "The Arcade uses Cafe Beans: a fictional play currency you earn by making drinks (and by roasting a perfect marshmallow on the Rooftop). Beans can't be bought, cashed out or traded, and if you ever run dry you get a free daily starter top-up.";
+  "The Arcade uses Cafe Beans: a fictional play currency you earn by making drinks, by roasting a perfect marshmallow on the Rooftop, and by winning the free cabinets (Fighter, Drift, Beat Battle: small and capped). Beans can't be bought, cashed out or traded, and if you ever run dry you get a free daily starter top-up.";
 
 export default function Home() {
   return (

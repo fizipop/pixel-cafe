@@ -213,9 +213,9 @@ export default function CafeGame() {
   // the Rooftop's piano, breeze and rain on Floor 3 (same volume + music toggle for all of them).
   useEffect(() => {
     musicRef.current?.setDucked(floor !== 1);
-    arcadeMusicRef.current?.setActive(floor === 2);
+    arcadeMusicRef.current?.setActive(floor === 2 && arcade !== "beat"); // Beat Battle plays its own track
     rooftopMusicRef.current?.setActive(floor === 3);
-  }, [floor, entered]);
+  }, [floor, entered, arcade]);
 
   // Stop the audio if the player leaves the page.
   useEffect(() => () => { musicRef.current?.stop(); sfxRef.current?.stop(); arcadeMusicRef.current?.stop(); rooftopMusicRef.current?.stop(); }, []);

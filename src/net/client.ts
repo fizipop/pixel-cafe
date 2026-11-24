@@ -10,8 +10,8 @@ import type { WorldAction, WorldState } from "@/game/worldState";
 import type { Floor } from "@/shared/floors";
 import {
   playerOccupant,
-  type Ack, type ArcadeEvent, type RooftopEvent, type BlackjackView, type CrashView, type FloorState, type GuestbookView, type InitPayload, type OutfitView,
-  type Result, type RouletteView, type RumourView, type ServerToClient, type TableInfo, type WalletMsg,
+  type Ack, type ArcadeEvent, type RooftopEvent, type BlackjackView, type CrashView, type FighterView, type FloorState, type GuestbookView, type InitPayload, type OutfitView,
+  type PokerView, type PoolView, type Result, type RouletteView, type RumourView, type ServerToClient, type TableInfo, type WalletMsg,
 } from "@/shared/protocol";
 
 const CLIENT_ID_KEY = "pixelcafe.clientId";
@@ -61,6 +61,9 @@ export class NetClient {
   crash: CrashView | null = null;
   roulette: RouletteView | null = null;
   bj: BlackjackView | null = null;
+  poker: PokerView | null = null;
+  pool: PoolView | null = null;
+  fighter: FighterView | null = null;
   private topupSeq = 0;
   private held: number | null = null;
   /** socket id -> display name, for everyone we've seen (used by the table game UI). */
@@ -95,7 +98,7 @@ export class NetClient {
     socket.on("floor:state", (p: FloorState) => {
       this.floor = p.floor;
       for (const q of p.players) this.names.set(q.id, unescapeHtml(q.name));
-      if (p.floor !== 2) { this.crash = null; this.roulette = null; this.bj = null; }
+      if (p.floor !== 2) { this.crash = null; this.roulette = null; this.bj = null; this.poker = null; this.pool = null; this.fighter = null; }
       this.emit();
     });
     socket.on("wallet", (p: WalletMsg) => {
@@ -106,6 +109,9 @@ export class NetClient {
     socket.on("crash:state", (p: CrashView | null) => { this.crash = p; this.emit(); });
     socket.on("roulette:state", (p: RouletteView | null) => { this.roulette = p; this.emit(); });
     socket.on("bj:state", (p: BlackjackView | null) => { this.bj = p; this.emit(); });
+    socket.on("pk:state", (p: PokerView | null) => { this.poker = p; this.emit(); });
+    socket.on("pl:state", (p: PoolView | null) => { this.pool = p; this.emit(); });
+    socket.on("fg:state", (p: FighterView | null) => { this.fighter = p; this.emit(); });
     socket.on("disconnect", () => {
       this.closed = true;
       this.emit();
@@ -203,6 +209,8 @@ export class NetClient {
   goFloor(floor: Floor) { return this.ask("floor:go", { floor }); }
   /** Beans from a drink you made or gave away (the server caps and rate limits these). */
   earn(amount: number) { if (!this.closed) this.socket.emit("beans:earn", { amount }); }
+  /** Fire-and-forget buttons for Pixel Fighter II (no answer expected; only sent when your buttons change). */
+  sendFightInput(bits: number) { if (!this.closed) this.socket.emit("fg:input", { bits }); }
   /** A Floor 2 mini-game request. Resolves with the server's answer (never throws). */
   call<T = object>(event: ArcadeEvent, payload?: unknown): Promise<Ack<T>> {
     return this.request<T>(event, payload, "The arcade didn't answer. Try again.");

@@ -14,6 +14,18 @@ export const BET_PRESETS = [5, 10, 25, 50, 100];
 export const validBet = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= MIN_BET && (n as number) <= MAX_BET;
 export type Rng = () => number;
 
+/** Small deterministic generator (same seed, same numbers): for tests and anything that must replay. */
+export function mulberry32(seed: number): Rng {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 // ------------------------------------------------------------------------------- slots
 
 export type SlotSymbol = "cup" | "croissant" | "bean" | "cat" | "seven";
@@ -189,10 +201,34 @@ export function blackjackReturn(result: BjResult, bet: number): number {
   }
 }
 
-// ------------------------------------------------------------------------------- Cat Ice Jump rewards
+// ------------------------------------------------------------------------------- Penguin Cross
 
-export const ICE_MAX_BEANS = 40;
-/** Beans for a run: 1 per 25 points, at most ICE_MAX_BEANS. Free to play: it can only give beans. */
-export const iceBeans = (score: number) => Math.min(ICE_MAX_BEANS, Math.floor(Math.max(0, score) / 25));
-/** Fastest believable climb (points per second): used to reject made-up scores. */
-export const ICE_MAX_RATE = 60;
+export const PENGUIN_TILES = 12; // ice tiles between the start and the far shore
+export const PENGUIN_EDGE = 0.97;
+export const PENGUIN_MAX_MULT = 1000;
+export type PenguinLane = "calm" | "thin" | "cracked";
+export const PENGUIN_LANES: Record<PenguinLane, { name: string; blurb: string; p0: number; grow: number }> = {
+  calm: { name: "Calm ice", blurb: "Thick ice. Small multipliers, gentle risk.", p0: 0.06, grow: 0.012 },
+  thin: { name: "Thin ice", blurb: "Cracks sooner and more often.", p0: 0.12, grow: 0.028 },
+  cracked: { name: "Cracked ice", blurb: "Very high variance. Huge multipliers, usually a splash.", p0: 0.2, grow: 0.05 },
+};
+export const PENGUIN_LANE_IDS = Object.keys(PENGUIN_LANES) as PenguinLane[];
+export const validPenguinLane = (l: unknown): l is PenguinLane => typeof l === "string" && Object.hasOwn(PENGUIN_LANES, l);
+
+/** Chance that tile number `step` (1 = the first tile) is weak ice. It climbs with every step. */
+export const penguinCrackChance = (lane: PenguinLane, step: number) =>
+  Math.min(0.92, PENGUIN_LANES[lane].p0 + PENGUIN_LANES[lane].grow * (Math.max(1, step) - 1));
+
+/** Multiplier after `steps` safe tiles: fair odds minus a 3% edge, so every lane returns about 97%. */
+export function penguinMultiplier(lane: PenguinLane, steps: number): number {
+  if (steps <= 0) return 1;
+  let survive = 1;
+  for (let k = 1; k <= steps; k++) survive *= 1 - penguinCrackChance(lane, k);
+  return Math.min(PENGUIN_MAX_MULT, Math.floor((PENGUIN_EDGE / survive) * 100) / 100);
+}
+
+// ------------------------------------------------------------------------------- free-to-play cabinets
+
+/** Cabinets that cost nothing to play (Pixel Fighter II, Neon Drift GP, Beat Battle) can only ever give beans, so what they give is capped. */
+export const FREE_REWARD_CAP = 150; // beans per window
+export const FREE_REWARD_WINDOW_MS = 10 * 60_000;

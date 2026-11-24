@@ -1,6 +1,6 @@
 # Pixel Cafe
 
-An anonymous, multiplayer, pixel-art social experience. **Phase 1: landing page + pixel character editor. Phase 2: walkable cafe + lofi music. Phase 3: NPCs, sitting, Rumour Board, emotes. Phase 3.5: jukebox + weather, drink mini-game, table game, guestbook, cafe cat, sound effects. Phase 4: real-time multiplayer (Socket.IO), proximity chat, shared room state. Phase 5: private tables, outfit leaderboard, server persistence. Phase 6: Floor 2, the Arcade (elevator, blackjack, roulette, slots, mines, To the Moon, Cat Ice Jump, leaderboards). Phase 7: Floor 3, the Rooftop Lounge (floor picker, campfire marshmallows, stargazing wishes, Polaroid Wall).**
+An anonymous, multiplayer, pixel-art social experience. **Phase 1: landing page + pixel character editor. Phase 2: walkable cafe + lofi music. Phase 3: NPCs, sitting, Rumour Board, emotes. Phase 3.5: jukebox + weather, drink mini-game, table game, guestbook, cafe cat, sound effects. Phase 4: real-time multiplayer (Socket.IO), proximity chat, shared room state. Phase 5: private tables, outfit leaderboard, server persistence. Phase 6: Floor 2, the Arcade (elevator, blackjack, roulette, slots, mines, To the Moon, Cat Ice Jump, leaderboards). Phase 7: Floor 3, the Rooftop Lounge (floor picker, campfire marshmallows, stargazing wishes, Polaroid Wall). Phase 8: Arcade expansion (Penguin Cross, Texas Hold'em, Pixel Fighter II, Neon Drift GP, Beat Battle, 8-Ball Pool).**
 
 ## Run it
 
@@ -38,10 +38,10 @@ If the server isn't running, `/play` still works in **solo mode** (like Phase 3.
 | Slots cabinets | 3 reels: coffee cup, croissant, golden bean, pixel cat, 7 (payout table in the window) | **E** at the cabinet |
 | Cafe Mines | 5x5 board, you pick 1-24 hazards, reveal safe tiles, cash out any time | **E** at the cabinet |
 | To the Moon | Shared rocket with a rising multiplier, optional auto cash-out | **E** at the cabinet |
-| Cat Ice Jump | Playable cabinet: `<-` `->` / A D steer, Space / W / Up jump, or tap (left/right third steers) | **E** at the cabinet |
-| Leaderboard kiosk | Top Ice Jump runs, biggest Moon multipliers, richest Cafe Bean balances | **E** at the kiosk |
+| Penguin Cross | See the Phase 8 section below | **E** at the cabinet |
+| Leaderboard kiosk | Penguin Cross, Moon, Drift, Beat Battle, Fighter boards and richest Cafe Beans (Phase 8) | **E** at the kiosk |
 
-**Cafe Beans are a fictional play currency**: they can't be bought, cashed out or traded. You earn them making drinks and gifting them, and spend them on Floor 2 (bets 5 to 500). If you drop below the smallest bet you get a free **daily starter top-up** (+50, once a day), and Cat Ice Jump is free to play and pays beans, so nobody gets stuck. Balances live on the server (`server/wallet.ts`), and every game result is decided server-side (`server/arcade.ts`, `crash.ts`, `roulette.ts`, `blackjack.ts`, `solo.ts`). Wallets and the three leaderboards persist in `server/data.json` through the same `Repository` interface.
+**Cafe Beans are a fictional play currency**: they can't be bought, cashed out or traded. You earn them making drinks and gifting them, and spend them on Floor 2 (bets 5 to 500). If you drop below the smallest bet you get a free **daily starter top-up** (+50, once a day), and the free cabinets (Pixel Fighter II, Neon Drift GP, Beat Battle) pay small, capped bean rewards, so nobody gets stuck. Balances live on the server (`server/wallet.ts`), and every game result is decided server-side (`server/arcade.ts`, `crash.ts`, `roulette.ts`, `blackjack.ts`, `solo.ts`). Wallets and the three leaderboards persist in `server/data.json` through the same `Repository` interface.
 
 Environment variables (all optional): `PORT` (server port, default 3001), `CLIENT_ORIGIN` (comma-separated allowed website origins; default allows any), `NEXT_PUBLIC_SOCKET_URL` (where the browser finds the server; default `http://<this host>:3001`, so opening the site through your LAN IP also works).
 
@@ -199,3 +199,19 @@ Press **E** at any elevator to open the floor picker (click a floor, or press **
 | Polaroid Wall | Shared gallery | **E**. The newest 24 photos, saved in `server/data.json`. |
 
 Code: `src/game/rooftop*.ts` (layout, art, scene), `src/shared/rooftop.ts` (rules), `server/rooftop.ts`, `src/components/rooftop/`, `src/lib/rooftopMusic.ts`.
+
+## Phase 8: Arcade expansion (Floor 2)
+
+Cat Ice Jump is gone, replaced by **Penguin Cross**. Floor 2 now has eight cabinets and four tables, all using fictional Cafe Beans (not purchasable, not redeemable).
+
+| Where | Game | Controls |
+| --- | --- | --- |
+| Cabinet | **Penguin Cross**: pick a bet and an ice lane (calm / thin / cracked), step across 12 tiles. Each safe tile raises the multiplier, each step can crack the ice and lose the bet. Cash out after any safe step. | click **Step forward** / **Cash out** |
+| Poker table (6 seats) | **Texas Hold'em** No-Limit, blinds 5/10, buy-in 100-1000, 20 s turn clock, side pots, house bots (Add bot). | sit (**E**), Buy in, Fold / Check / Call / Raise (slider + presets) |
+| Cabinet | **Pixel Fighter II**: 4 fighters, best of 3. CPU ladder (5 stages) or live 1v1 (queue at the cabinet). The server runs the fight. | **A/D** move, **W** jump, **S** block, **J** light, **K** heavy, **L** special (arrows work too) |
+| Pool table (2 stools) | **8-Ball Pool** vs the house bot or the other player, optional stake (10-100 each; the bot pays 1.8x). | sit (**E**), drag back from the cue ball and release |
+| Cabinet | **Neon Drift GP**: 3 laps against 3 CPU cars, turbo pads, oil, drift turbo. Podium pays 30/18/8 beans; best lap saved. | **W/S** gas/brake, **A/D** steer, **Space** drift |
+| Cabinet | **Beat Battle**: 4 lanes, Sick/Good/Miss, combo up to x4, hype tug-of-war with a rival DJ. Rank S/A/B/C pays 25/15/8/3. | **D F J K** or arrow keys (or tap the buttons) |
+| Kiosk | **Leaderboards**: Penguin Cross multipliers, fastest laps, Beat Battle scores, Fighter win streaks, To the Moon, richest. | **E** |
+
+Fairness: Penguin Cross, Poker, Pool and Fighter results are decided on the server (shared deterministic engines in `src/shared/`). Drift and Beat Battle run in the browser, so the server only accepts times that are physically possible, runs that took real time, and scores it recomputes from your judgements; free cabinets can only pay out a capped number of beans (150 per 10 minutes). Leaderboards persist in `server/data.json`.

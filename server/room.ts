@@ -228,6 +228,11 @@ export class Room {
     p.dirty = true;
   }
 
+  /** Called ~30 times a second: the real-time fights (Pixel Fighter II). */
+  fastTick() {
+    this.arcade.tickFast(this.now());
+  }
+
   /** Called ~15 times a second: one batched, droppable packet with everybody who moved. */
   tick() {
     const moved: MoveUpdate[] = [];

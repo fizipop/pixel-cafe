@@ -4,7 +4,7 @@ import { FLOORS, FLOOR_NAMES, type Floor } from "@/shared/floors";
 
 const BLURB: Record<Floor, string> = {
   1: "Coffee, the jukebox, tic-tac-toe, the cat and the Rumour Board.",
-  2: "Neon arcade: slots, mines, roulette, blackjack and Cat Ice Jump.",
+  2: "Neon arcade: poker, pool, fighting, racing, rhythm, slots, mines and more.",
   3: "Fairy lights, a campfire, a telescope and a Polaroid Wall under the stars.",
 };
 const ICON: Record<Floor, string> = { 1: "☕", 2: "🕹️", 3: "🌙" };

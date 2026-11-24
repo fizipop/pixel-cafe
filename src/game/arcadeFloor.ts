@@ -1,7 +1,7 @@
 import * as Phaser from "phaser";
 import { WALL_H, WORLD_H, WORLD_W, TILE } from "./constants";
 import {
-  ARCADE_PLANTS, BLACKJACK, CARD_TABLES, MACHINES, ROULETTE, arcadeSeats,
+  ARCADE_PLANTS, BLACKJACK, MACHINES, POKER, POOL_TABLE, ROULETTE, TABLE_SOLIDS, arcadeSeats, plantBox,
 } from "./arcadeLayout";
 import { FLOOR2_X, STAIRS } from "@/shared/floors";
 
@@ -66,7 +66,10 @@ export function buildArcadeFloor(b: FloorBuilder) {
     b.solid(m.solid.x, m.solid.y, m.solid.w, m.solid.h);
     neonGlow(scene, m.x + m.w / 2, m.y + 28, m.game ? 1.1 : 0.8, m.glow, m.game ? 0.3 : 0.18);
     if (m.game) {
-      const names: Record<string, string> = { slots: "SLOTS", mines: "MINES", moon: "TO THE MOON", ice: "ICE JUMP", board: "TOP SCORES" };
+      const names: Record<string, string> = {
+        slots: "SLOTS", mines: "MINES", moon: "TO THE MOON", penguin: "PENGUIN CROSS", board: "TOP SCORES",
+        fighter: "FIGHTER II", racer: "NEON DRIFT", beat: "BEAT BATTLE",
+      };
       label(scene, m.x + m.w / 2, WALL_H - 4, names[m.game] ?? "", "#fff6e0", 14);
     }
   }
@@ -74,20 +77,26 @@ export function buildArcadeFloor(b: FloorBuilder) {
   // tables
   for (const [t, key] of [[BLACKJACK, "bj_table"], [ROULETTE, "rt_table"]] as const) {
     b.place(key, t.x, t.y);
-    b.solid(t.x + 4, t.y + 22, t.w - 8, key === "bj_table" ? 44 : 46);
+    const sb = TABLE_SOLIDS[key === "bj_table" ? "bj0" : "rt0"];
+    b.solid(sb.x, sb.y, sb.w, sb.h);
     neonGlow(scene, t.x + t.w / 2, t.y + 40, 2.2, key === "bj_table" ? 0x7fe0a9 : 0xff9bd0, 0.16);
   }
   label(scene, BLACKJACK.x + BLACKJACK.w / 2, BLACKJACK.y - 18, "BLACKJACK", "#7fe0a9", 16).setDepth(BLACKJACK.y + 90);
   label(scene, ROULETTE.x + ROULETTE.w / 2, ROULETTE.y - 4, "ROULETTE", "#ff9bd0", 16).setDepth(ROULETTE.y + 90);
-  for (const t of CARD_TABLES) {
-    b.place("card_table", t.x, t.y);
-    b.solid(t.x + 8, t.y + 20, t.w - 16, 28);
-  }
+  b.place("poker_table", POKER.x, POKER.y);
+  b.solid(TABLE_SOLIDS.pk0.x, TABLE_SOLIDS.pk0.y, TABLE_SOLIDS.pk0.w, TABLE_SOLIDS.pk0.h);
+  neonGlow(scene, POKER.x + POKER.w / 2, POKER.y + 40, 3, 0x7fe0a9, 0.14);
+  label(scene, POKER.x + POKER.w / 2, POKER.y + 2, "TEXAS HOLD'EM", "#7fe0a9", 16).setDepth(POKER.y + 100);
+  b.place("pool_table", POOL_TABLE.x, POOL_TABLE.y);
+  b.solid(TABLE_SOLIDS.pl0.x, TABLE_SOLIDS.pl0.y, TABLE_SOLIDS.pl0.w, TABLE_SOLIDS.pl0.h);
+  neonGlow(scene, POOL_TABLE.x + POOL_TABLE.w / 2, POOL_TABLE.y + 50, 3, 0x58a6e0, 0.14);
+  label(scene, POOL_TABLE.x + POOL_TABLE.w / 2, POOL_TABLE.y + 4, "8-BALL POOL", "#58a6e0", 16).setDepth(POOL_TABLE.y + 140);
   for (const s of arcadeSeats()) b.place("stool", s.x - 8, s.y - 6).setDepth(s.depth - 2);
 
   for (const [x, y] of ARCADE_PLANTS) {
     b.place("plant", x - 12, y - 40).setDepth(y);
-    b.solid(x - 8, y - 12, 16, 12);
+    const pb = plantBox([x, y]);
+    b.solid(pb.x, pb.y, pb.w, pb.h);
   }
 
   scene.add.image(FLOOR2_X, 0, "vignette").setOrigin(0).setDepth(100000);

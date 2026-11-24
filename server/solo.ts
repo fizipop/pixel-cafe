@@ -1,19 +1,26 @@
-// The one-player Floor 2 games: Pixel Slots, Cafe Mines and Cat Ice Jump. All results are decided
-// here on the server (the browser only animates them), and all stakes are fictional Cafe Beans.
+// The one-player Floor 2 games: Pixel Slots, Cafe Mines and Penguin Cross, plus the checks for the Neon Drift GP
+// and Beat Battle cabinets. All results are decided (or verified) here on the server (the browser only animates
+// them), and all stakes are fictional Cafe Beans.
 import {
-  ICE_MAX_RATE, MINES_TILES, iceBeans, minesMultiplier, placeMines, slotMultiplier, spinReel, validBet, validMineCount,
-  type SlotSymbol,
+  MINES_TILES, PENGUIN_TILES, minesMultiplier, penguinCrackChance, penguinMultiplier, placeMines, slotMultiplier, spinReel, validBet,
+  validMineCount, validPenguinLane, type PenguinLane, type SlotSymbol,
 } from "../src/shared/arcade.ts";
-import type { IceFinish, MinesView, SlotsResult } from "../src/shared/protocol.ts";
+import { RANK_BEANS, SONG_MS, rankOf, scoreRun } from "../src/shared/beat.ts";
+import { RACE, raceBeans, track } from "../src/shared/racer.ts";
+import type { MinesView, PenguinView, RunFinish, SlotsResult } from "../src/shared/protocol.ts";
 import { fail, type EngineCtx, type Fail, type Who } from "./arcadeTypes.ts";
-import type { Repository } from "./repository.ts";
+import { LOWER_IS_BETTER, type BoardId, type Repository } from "./repository.ts";
+import { FreeRewards } from "./rewards.ts";
 
+type PenguinGame = { bet: number; lane: PenguinLane; steps: number };
 type MinesGame = { bet: number; mines: number; hazards: number[]; revealed: number[] };
 
 export class SoloGames {
   private mines = new Map<string, MinesGame>(); // by client id
-  private ice = new Map<string, { token: number; at: number }>();
-  private lastIceToken = 0;
+  private penguin = new Map<string, PenguinGame>();
+  private runs = new Map<string, { token: number; at: number }>();
+  private lastToken = 0;
+  readonly rewards: FreeRewards;
 
   private ctx: EngineCtx;
   private repo: Repository;
@@ -21,6 +28,7 @@ export class SoloGames {
   constructor(ctx: EngineCtx, repo: Repository) {
     this.ctx = ctx;
     this.repo = repo;
+    this.rewards = new FreeRewards(ctx.now);
   }
 
   // ------------------------------------------------------------ slots
@@ -99,30 +107,119 @@ export class SoloGames {
     return { ok: true as const, view: this.minesView(w, g, over, payout) };
   }
 
-  // ------------------------------------------------------------ cat ice jump
+  // ------------------------------------------------------------ penguin cross
 
-  iceStart(w: Who): { ok: true; token: number } {
-    const token = ++this.lastIceToken;
-    this.ice.set(w.clientId, { token, at: this.ctx.now() });
+  private penguinView(w: Who, g: PenguinGame, over?: PenguinView["over"], payout?: number): PenguinView {
+    const steps = g.steps;
+    return {
+      active: !over, bet: g.bet, lane: g.lane, steps, tiles: PENGUIN_TILES,
+      mult: penguinMultiplier(g.lane, steps),
+      next: steps < PENGUIN_TILES ? penguinMultiplier(g.lane, steps + 1) : penguinMultiplier(g.lane, steps),
+      chance: penguinCrackChance(g.lane, steps + 1),
+      over, payout, beans: this.ctx.wallets.balance(w.clientId),
+    };
+  }
+
+  penguinState(w: Who): { ok: true; view: PenguinView } | Fail {
+    const g = this.penguin.get(w.clientId);
+    return g ? { ok: true, view: this.penguinView(w, g) } : fail("No crossing in progress.");
+  }
+
+  penguinStart(w: Who, bet: unknown, lane: unknown): { ok: true; view: PenguinView } | Fail {
+    if (this.penguin.has(w.clientId)) return fail("Finish your current crossing first.");
+    if (!validBet(bet)) return fail("Pick a valid bet.");
+    if (!validPenguinLane(lane)) return fail("Pick an ice lane.");
+    if (!this.ctx.wallets.debit(w.clientId, bet)) return fail("Not enough Cafe Beans.");
+    const g: PenguinGame = { bet, lane, steps: 0 };
+    this.penguin.set(w.clientId, g);
+    this.ctx.touch(w.clientId);
+    return { ok: true, view: this.penguinView(w, g) };
+  }
+
+  /** Step onto the next tile: it holds (multiplier up) or it cracks and the bet is lost. */
+  penguinStep(w: Who): { ok: true; view: PenguinView } | Fail {
+    const g = this.penguin.get(w.clientId);
+    if (!g) return fail("Start a crossing first.");
+    if (this.ctx.rng() < penguinCrackChance(g.lane, g.steps + 1)) {
+      this.penguin.delete(w.clientId);
+      return { ok: true, view: this.penguinView(w, g, "cracked", 0) };
+    }
+    g.steps++;
+    if (g.steps >= PENGUIN_TILES) return this.penguinCash(w, g, "shore"); // made it across: paid automatically
+    return { ok: true, view: this.penguinView(w, g) };
+  }
+
+  penguinCashout(w: Who): { ok: true; view: PenguinView } | Fail {
+    const g = this.penguin.get(w.clientId);
+    if (!g) return fail("No crossing in progress.");
+    if (g.steps < 1) return fail("Take at least one step first.");
+    return this.penguinCash(w, g, "cashed");
+  }
+
+  private penguinCash(w: Who, g: PenguinGame, over: "cashed" | "shore") {
+    this.penguin.delete(w.clientId);
+    const mult = penguinMultiplier(g.lane, g.steps);
+    const payout = Math.floor(g.bet * mult);
+    if (payout > 0) this.ctx.wallets.credit(w.clientId, payout);
+    this.ctx.touch(w.clientId);
+    if (mult > 1) this.record("penguin", w, mult);
+    return { ok: true as const, view: this.penguinView(w, g, over, payout) };
+  }
+
+  // ------------------------------------------------------------ boards
+
+  /** Save a personal best (if it is one) and say where it ranks. */
+  record(board: BoardId, w: Who, value: number): { best: boolean; rank: number | null } {
+    const lower = LOWER_IS_BETTER[board];
+    const prev = this.repo.getBest(board, w.clientId);
+    const best = !prev || (lower ? value < prev.value : value > prev.value);
+    if (best) this.repo.setBest(board, w.clientId, { name: w.name, value, ts: this.ctx.now() });
+    else if (prev && prev.name !== w.name) this.repo.setBest(board, w.clientId, { ...prev, name: w.name });
+    const list = this.repo.listBest(board).sort((a, b) => (lower ? a.record.value - b.record.value : b.record.value - a.record.value) || a.record.ts - b.record.ts);
+    const idx = list.findIndex((r) => r.clientId === w.clientId);
+    return { best, rank: idx >= 0 ? idx + 1 : null };
+  }
+
+  // ------------------------------------------------------------ Neon Drift GP and Beat Battle (a run is started, then finished)
+
+  runStart(game: "racer" | "beat", w: Who): { ok: true; token: number } {
+    const token = ++this.lastToken;
+    this.runs.set(`${game}:${w.clientId}`, { token, at: this.ctx.now() });
     return { ok: true, token };
   }
 
-  iceFinish(w: Who, token: unknown, score: unknown): ({ ok: true } & IceFinish) | Fail {
-    const run = this.ice.get(w.clientId);
-    if (!run || run.token !== token) return fail("That run has already been recorded.");
-    this.ice.delete(w.clientId);
-    if (!Number.isInteger(score) || (score as number) < 0) return fail("Bad score.");
-    const elapsed = Math.max(0, (this.ctx.now() - run.at) / 1000);
-    const s = score as number;
-    if (s > Math.floor(elapsed * ICE_MAX_RATE) + 10) return fail("That score is too high for the time it took.");
-    const beans = iceBeans(s);
+  private takeRun(game: "racer" | "beat", w: Who, token: unknown) {
+    const key = `${game}:${w.clientId}`;
+    const run = this.runs.get(key);
+    if (!run || run.token !== token) return null;
+    this.runs.delete(key); // a run can be submitted once, good or bad
+    return run;
+  }
+
+  racerFinish(w: Who, token: unknown, totalMs: unknown, bestLapMs: unknown, position: unknown): ({ ok: true } & RunFinish) | Fail {
+    const run = this.takeRun("racer", w, token);
+    if (!run) return fail("That race has already been recorded.");
+    const min = track().minLapMs;
+    if (!Number.isInteger(totalMs) || !Number.isInteger(bestLapMs) || !Number.isInteger(position) || (position as number) < 1 || (position as number) > 4) return fail("Bad race result.");
+    const total = totalMs as number, lap = bestLapMs as number;
+    if (lap < min || total < RACE.LAPS * min || lap * RACE.LAPS > total + 5) return fail("Those lap times are not possible on this track.");
+    if (this.ctx.now() - run.at < RACE.COUNTDOWN_MS + total - 3000) return fail("That race finished faster than real time.");
+    const beans = this.rewards.grant(w.clientId, raceBeans(position as number));
     if (beans > 0) { this.ctx.wallets.credit(w.clientId, beans); this.ctx.touch(w.clientId); }
-    const prev = this.repo.getBest("ice", w.clientId);
-    const best = s > 0 && (!prev || s > prev.value);
-    if (best) this.repo.setBest("ice", w.clientId, { name: w.name, value: s, ts: this.ctx.now() });
-    else if (prev && prev.name !== w.name) this.repo.setBest("ice", w.clientId, { ...prev, name: w.name });
-    const board = this.repo.listBest("ice").sort((a, b) => b.record.value - a.record.value);
-    const idx = board.findIndex((r) => r.clientId === w.clientId);
-    return { ok: true, beans, best, score: s, rank: idx >= 0 ? idx + 1 : null };
+    const r = this.record("drift", w, lap);
+    return { ok: true, beans, best: r.best, rank: r.rank, value: lap };
+  }
+
+  beatFinish(w: Who, token: unknown, seq: unknown): ({ ok: true; rankLetter: string; score: number; maxCombo: number } & RunFinish) | Fail {
+    const run = this.takeRun("beat", w, token);
+    if (!run) return fail("That song has already been recorded.");
+    const s = scoreRun(seq);
+    if (!s) return fail("Bad run data.");
+    if (this.ctx.now() - run.at < SONG_MS - 4000) return fail("That song finished faster than real time.");
+    const letter = rankOf(s);
+    const beans = this.rewards.grant(w.clientId, RANK_BEANS[letter]);
+    if (beans > 0) { this.ctx.wallets.credit(w.clientId, beans); this.ctx.touch(w.clientId); }
+    const r = s.failed ? { best: false, rank: null } : this.record("beat", w, s.score);
+    return { ok: true, beans, best: r.best, rank: r.rank, value: s.score, rankLetter: letter, score: s.score, maxCombo: s.maxCombo };
   }
 }

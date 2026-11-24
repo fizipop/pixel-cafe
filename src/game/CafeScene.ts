@@ -22,7 +22,7 @@ import { buildArcadeFloor } from "./arcadeFloor";
 import { buildRooftopTextures } from "./rooftopArt";
 import { buildRooftopFloor } from "./rooftopFloor";
 import { PHOTO_STAND, POLAROID_WALL, TELESCOPE, isFireSeat, type RooftopGame } from "./rooftopLayout";
-import { MACHINES, ROULETTE_WATCH, arcadeSeatInfo, type ArcadeGame, type Machine } from "./arcadeLayout";
+import { MACHINES, ROULETTE_WATCH, TABLE_GAME, TABLE_NAME, arcadeSeatInfo, type ArcadeGame, type Machine } from "./arcadeLayout";
 import { STAIRS, WORLD_TOTAL_W, floorBounds, type Floor } from "@/shared/floors";
 import { WeatherLayer } from "./weather";
 import { Cat } from "./cat";
@@ -589,7 +589,7 @@ export class CafeScene extends Phaser.Scene {
   private promptFor(t: Target | null): string {
     if (this.seated) {
       const arc = this.arcadeSeat();
-      if (arc) return `Press E to open the ${arc.table === "bj0" ? "Blackjack" : "Roulette"} table\nMove to stand up`;
+      if (arc) return `Press E to open the ${TABLE_NAME[arc.table]} table\nMove to stand up`;
       if (isFireSeat(this.seated.id)) return "Press E to roast a marshmallow\nMove to stand up";
       if (this.atGameTable()) return "Press E to play Tic-Tac-Toe\nMove to stand up";
       if (privateTableOf(this.seated.id)) return "Private Table: chat stays at this table\nPress E to stand";
@@ -599,7 +599,7 @@ export class CafeScene extends Phaser.Scene {
     switch (t.kind) {
       case "seat": {
         const arc = arcadeSeatInfo(t.seat.id);
-        if (arc) return arc.table === "bj0" ? "Press E to sit and play Blackjack" : "Press E to sit at the Roulette table";
+        if (arc) return `Press E to sit at the ${TABLE_NAME[arc.table]} table`;
         if (isFireSeat(t.seat.id)) return "Press E to sit by the campfire";
         if (t.seat.id.startsWith(GAME_SEAT_PREFIX)) return "Press E to sit and play Tic-Tac-Toe";
         return privateTableOf(t.seat.id) ? "Press E to join the Private Table (up to 6)" : "Press E to sit";
@@ -776,7 +776,7 @@ export class CafeScene extends Phaser.Scene {
     this.hitbox.setPosition(seat.x, seat.y - 4);
     this.sfx("sit");
     const arc = arcadeSeatInfo(seat.id);
-    if (arc) this.time.delayedCall(450, () => { if (this.seated?.id === seat.id) this.cb()?.onOpenArcade(arc.table === "bj0" ? "blackjack" : "roulette"); });
+    if (arc) this.time.delayedCall(450, () => { if (this.seated?.id === seat.id) this.cb()?.onOpenArcade(TABLE_GAME[arc.table]); });
     if (seat.id.startsWith(GAME_SEAT_PREFIX)) {
       if (!this.net) this.world.dispatch({ type: "ttt", action: { type: "join", side: "X", by: this.selfOcc } }); // online: the server seats us
       this.time.delayedCall(450, () => { if (this.atGameTable()) this.cb()?.onOpenGame(); }); // the board comes to you
@@ -835,7 +835,7 @@ export class CafeScene extends Phaser.Scene {
         else if (interact) {
           const arc = this.arcadeSeat();
           if (isFireSeat(this.seated.id)) this.roofWindow("roast"); // E at the campfire: roast a marshmallow
-          else if (arc) this.cb()?.onOpenArcade(arc.table === "bj0" ? "blackjack" : "roulette"); // E re-opens the table
+          else if (arc) this.cb()?.onOpenArcade(TABLE_GAME[arc.table]); // E re-opens the table
           else if (this.atGameTable()) this.cb()?.onOpenGame(); // E re-opens the board; walking away stands you up
           else this.standUp();
         }

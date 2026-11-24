@@ -78,6 +78,7 @@ export function createCafeServer(opts: { origins?: string[]; room?: RoomOptions 
 
   const timers = [
     setInterval(() => room.tick(), Math.round(1000 / MOVE_HZ)),
+    setInterval(() => room.fastTick(), 33), // Pixel Fighter II runs at 60 steps a second, sent ~30 times a second
     setInterval(() => room.sweep(), 60_000),
   ];
 

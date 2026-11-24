@@ -6,7 +6,7 @@ import { ArcadeFrame, BetPicker, useBeans, useCountdown, type ArcadeProps } from
 
 const SUIT: Record<string, string> = { S: "♠", H: "♥", D: "♦", C: "♣" };
 
-function PlayingCard({ card, fresh }: { card: Card; fresh?: boolean }) {
+export function PlayingCard({ card, fresh }: { card: Card; fresh?: boolean }) {
   const hidden = card === "??";
   const red = suitOf(card) === "H" || suitOf(card) === "D";
   return (

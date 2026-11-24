@@ -2,7 +2,7 @@ import * as Phaser from "phaser";
 import { ellipse, make, rect, type Ctx } from "./art";
 import { WALL_H, WORLD_H, WORLD_W } from "./constants";
 import { FLOOR2_X } from "@/shared/floors";
-import { BLACKJACK, ROULETTE } from "./arcadeLayout";
+import { BLACKJACK, POKER, POOL_TABLE, ROULETTE } from "./arcadeLayout";
 
 // Floor 2 art, all drawn in code like the rest of the cafe: a dark patterned arcade carpet,
 // glowing neon trim, retro cabinets, card/roulette tables and a leaderboard kiosk.
@@ -38,11 +38,11 @@ function drawBackground(c: Ctx) {
     }
   }
   // two rugs under the tables
-  for (const t of [BLACKJACK, ROULETTE]) {
+  for (const t of [BLACKJACK, ROULETTE, POKER, POOL_TABLE]) {
     const x = t.x - FLOOR2_X - 24;
     const y = t.y - 8;
     const w = t.w + 48;
-    const h = t.h + 96;
+    const h = t.h + (t === POKER ? 120 : t === POOL_TABLE ? 142 : 96);
     rect(c, "#0d0a1c", x - 4, y - 4, w + 8, h + 8);
     rect(c, "#3a1f58", x, y, w, h);
     rect(c, "#5a2f7a", x + 4, y + 4, w - 8, h - 8);
@@ -138,14 +138,43 @@ const sMoon: Screen = (c, x, y, w, h) => {
   rect(c, "#f2a93b", x + 3, y + 17, 2, 2);
   [0, 1, 2].forEach((i) => rect(c, "#9fb8d8", x + 1 + i * 3, y + 18 - i * 2, 1, 1));
 };
-const sIce: Screen = (c, x, y, w, h) => {
+const sPenguin: Screen = (c, x, y, w, h) => {
   rect(c, "#173a5a", x, y, w, h);
-  rect(c, "#2a6a9a", x, y + 14, w, 6);
-  rect(c, "#d8f4ff", x + 2, y + 10, 10, 4);
-  rect(c, "#d8f4ff", x + 14, y + 6, 8, 3);
-  rect(c, "#e0884a", x + 5, y + 6, 4, 4); // the cat
-  rect(c, "#e0884a", x + 5, y + 5, 1, 1);
-  rect(c, "#e0884a", x + 8, y + 5, 1, 1);
+  rect(c, "#2a6a9a", x, y + 14, w, 6); // icy water
+  for (const [tx, ty] of [[1, 10], [9, 10], [17, 10]]) rect(c, "#d8f4ff", x + tx, y + ty, 6, 4); // ice tiles
+  rect(c, "#9fd0e8", x + 11, y + 11, 2, 1); // a crack
+  rect(c, "#05030c", x + 3, y + 3, 4, 7); // the penguin: dark body, white belly, orange beak
+  rect(c, "#fff6e0", x + 4, y + 5, 2, 4);
+  rect(c, "#f2a93b", x + 7, y + 4, 1, 1);
+};
+const sFighter: Screen = (c, x, y, w, h) => {
+  rect(c, "#2a1030", x, y, w, h);
+  rect(c, "#d9304a", x + 1, y + 1, 9, 2); // health bars
+  rect(c, "#f2c36b", x + 12, y + 1, 9, 2);
+  rect(c, "#4a3a5a", x, y + 16, w, 4);
+  rect(c, "#f4f4f4", x + 3, y + 8, 3, 7); // karate fighter
+  rect(c, "#f1c27d", x + 3, y + 5, 3, 3);
+  rect(c, "#f1c27d", x + 6, y + 9, 3, 1);
+  rect(c, "#3a5fd9", x + 17, y + 8, 3, 7); // rival
+  rect(c, "#8a6446", x + 17, y + 5, 3, 3);
+  rect(c, "#ff8a3a", x + 10, y + 9, 2, 2); // fireball
+};
+const sRacer: Screen = (c, x, y, w, h) => {
+  rect(c, "#1a2a1a", x, y, w, h);
+  rect(c, "#3a3a4a", x + 3, y + 2, 4, 16); // a bend of road
+  rect(c, "#3a3a4a", x + 3, y + 2, 16, 4);
+  rect(c, "#3a3a4a", x + 15, y + 2, 4, 16);
+  rect(c, "#fff6e0", x + 5, y + 3, 1, 1);
+  rect(c, "#58e1ff", x + 4, y + 10, 2, 3);
+  rect(c, "#f2a93b", x + 16, y + 9, 2, 3);
+};
+const sBeat: Screen = (c, x, y, w, h) => {
+  rect(c, "#1a0a2a", x, y, w, h);
+  [[0, "#ff5fa8", 4], [1, "#58e1ff", 9], [2, "#7fe0a9", 6], [3, "#f2c36b", 12]].forEach(([i, col, ay]) => {
+    rect(c, "#2a1a3a", x + 1 + (i as number) * 5, y, 4, h);
+    rect(c, col as string, x + 1 + (i as number) * 5, y + (ay as number), 4, 3);
+  });
+  rect(c, "#fff6e0", x, y + 16, w, 1); // the hit line
 };
 const sInvaders: Screen = (c, x, y, w, h) => {
   rect(c, "#0b1a10", x, y, w, h);
@@ -158,19 +187,6 @@ const sInvaders: Screen = (c, x, y, w, h) => {
     rect(c, "#7fe0a9", ix + 4, iy + 3, 1, 1);
   }
   rect(c, "#fff6e0", x + 10, y + 16, 3, 2);
-};
-const sRacing: Screen = (c, x, y, w, h) => {
-  rect(c, "#1a1a2a", x, y, w, h);
-  for (let i = 0; i < 5; i++) rect(c, "#fff6e0", x + 11, y + i * 4, 2, 2);
-  rect(c, "#d9304a", x + 9, y + 13, 5, 5);
-  rect(c, "#58e1ff", x + 3, y + 2, 4, 4);
-};
-const sPong: Screen = (c, x, y, w, h) => {
-  rect(c, "#05050a", x, y, w, h);
-  rect(c, "#fff6e0", x + 2, y + 5, 2, 8);
-  rect(c, "#fff6e0", x + w - 4, y + 9, 2, 8);
-  rect(c, "#fff6e0", x + 12, y + 9, 2, 2);
-  for (let i = 0; i < h; i += 3) rect(c, "#555566", x + w / 2, y + i, 1, 2);
 };
 
 // ---------------------------------------------------------------------------- kiosk, elevator
@@ -315,19 +331,42 @@ function drawRoulette(c: Ctx) {
   drawCard(c, 118, 3, true);
 }
 
-function drawCardTable(c: Ctx) {
-  ellipse(c, "#00000055", 48, 58, 44, 5);
-  rect(c, "#33200f", 8, 18, 80, 40);
-  rect(c, "#5a3a22", 8, 12, 80, 40);
-  ellipse(c, "#5a3a22", 48, 12, 40, 10);
-  ellipse(c, "#5a3a22", 48, 52, 40, 6);
-  ellipse(c, FELT, 48, 28, 36, 14);
-  rect(c, FELT, 12, 20, 72, 22);
-  ellipse(c, FELT_HI, 48, 22, 30, 4);
-  drawCard(c, 30, 22, true);
-  drawCard(c, 39, 24, false);
-  drawCard(c, 56, 22, false, true);
-  drawChips(c, 70, 40, ["#d9304a", "#f2c36b"]);
+function drawPoker(c: Ctx) {
+  const W = POKER.w;
+  ellipse(c, "#00000055", W / 2, 94, W / 2 - 2, 5);
+  rect(c, "#33200f", 4, 24, W - 8, 66); // legs/apron
+  rect(c, "#5a3a22", 0, 12, W, 70); // padded rail
+  rect(c, "#05030c", 0, 12, W, 2);
+  rect(c, "#3a2412", 6, 18, W - 12, 58);
+  rect(c, FELT, 10, 20, W - 20, 54); // felt
+  rect(c, FELT_HI, 10, 20, W - 20, 2);
+  for (let i = 0; i < 5; i++) { rect(c, "#1a5a3c", 56 + i * 26, 38, 22, 14); rect(c, "#2a8560", 56 + i * 26, 38, 22, 1); } // the five board slots
+  drawCard(c, 90, 40, true);
+  drawCard(c, 116, 40, false);
+  drawCard(c, 142, 40, true, true);
+  drawChips(c, 28, 66, ["#d9304a", "#fff6e0", "#3a5fd9"]);
+  drawChips(c, W - 40, 66, ["#7fe0a9", "#f2c36b"]);
+  rect(c, "#f2c36b", W / 2 - 10, 60, 20, 3); // the pot ring
+}
+
+function drawPool(c: Ctx) {
+  const W = POOL_TABLE.w;
+  const H = POOL_TABLE.h;
+  ellipse(c, "#00000055", W / 2, H - 6, W / 2 - 2, 5);
+  rect(c, "#2a1810", 8, 70, 10, 52); // legs
+  rect(c, "#2a1810", W - 18, 70, 10, 52);
+  rect(c, "#05030c", 0, 8, W, 74);
+  rect(c, "#6a4326", 1, 9, W - 2, 72); // wooden rail
+  rect(c, "#8a5a36", 1, 9, W - 2, 3);
+  rect(c, "#3a2412", 1, 76, W - 2, 5);
+  rect(c, "#1f4a8a", 12, 20, W - 24, 52); // blue felt (so it is not mistaken for the poker table)
+  rect(c, "#2a62b0", 12, 20, W - 24, 2);
+  for (const [px, py] of [[10, 18], [W / 2 - 4, 16], [W - 18, 18], [10, 66], [W / 2 - 4, 68], [W - 18, 66]]) ellipse(c, "#05030c", px + 4, py + 4, 5, 4);
+  const balls = ["#fff6e0", "#f2c36b", "#3a5fd9", "#d9304a", "#7a3ad9", "#f28fad", "#2a8560", "#05030c"];
+  balls.forEach((col, i) => { const bx = 150 + (i % 4) * 10 + (i > 3 ? 5 : 0); const by = 38 + Math.floor(i / 4) * 9 + (i % 2); ellipse(c, "#00000055", bx + 1, by + 2, 4, 2); ellipse(c, col, bx, by, 4, 4); rect(c, "#ffffff88", bx - 2, by - 2, 2, 2); });
+  ellipse(c, "#fff6e0", 62, 46, 4, 4);
+  rect(c, "#8a5a36", 20, 30, 38, 2); // a cue lying on the felt
+  rect(c, "#f2c36b", 20, 30, 4, 2);
 }
 
 function drawStool(c: Ctx) {
@@ -345,15 +384,17 @@ export function buildArcadeTextures(scene: Phaser.Scene) {
   make(scene, "cab_slots", 44, 60, (c) => cabinet(c, "#5a1a3a", "#f2c36b", "#d9304a", sSlots, ["#f2c36b", "#58e1ff"]));
   make(scene, "cab_mines", 44, 60, (c) => cabinet(c, "#143a2a", "#7fe0a9", "#1f6b4a", sMines, ["#7fe0a9", "#d9304a"]));
   make(scene, "cab_moon", 44, 60, (c) => cabinet(c, "#1a2050", "#9fb8d8", "#3a5fd9", sMoon, ["#58e1ff", "#f2c36b"]));
-  make(scene, "cab_ice", 44, 60, (c) => cabinet(c, "#14405a", "#58e1ff", "#256e8c", sIce, ["#fff6e0", "#e0884a"]));
+  make(scene, "cab_penguin", 44, 60, (c) => cabinet(c, "#14405a", "#58e1ff", "#256e8c", sPenguin, ["#fff6e0", "#f2a93b"]));
+  make(scene, "cab_fighter", 44, 60, (c) => cabinet(c, "#501a24", "#d9304a", "#9a2d3a", sFighter, ["#d9304a", "#f2c36b"]));
+  make(scene, "cab_racer", 44, 60, (c) => cabinet(c, "#50381a", "#f2a93b", "#9a6a2d", sRacer, ["#58e1ff", "#d9304a"]));
+  make(scene, "cab_beat", 44, 60, (c) => cabinet(c, "#3a1a50", "#ff5fa8", "#7a2d7a", sBeat, ["#58e1ff", "#7fe0a9"]));
   make(scene, "cab_deco0", 44, 60, (c) => cabinet(c, "#3a1a50", "#9b5de5", "#7a2d9a", sInvaders, ["#7fe0a9", "#ff5fa8"]));
-  make(scene, "cab_deco1", 44, 60, (c) => cabinet(c, "#50301a", "#f2a93b", "#9a5a2d", sRacing, ["#d9304a", "#58e1ff"]));
-  make(scene, "cab_deco2", 44, 60, (c) => cabinet(c, "#202030", "#fff6e0", "#555570", sPong, ["#fff6e0", "#7fe0a9"]));
   make(scene, "kiosk", 56, 68, drawKiosk);
   make(scene, "elevator_up", 56, 72, drawElevator("up"));
   make(scene, "elevator_down", 56, 72, drawElevator("down"));
   make(scene, "bj_table", BLACKJACK.w, BLACKJACK.h, drawBlackjack);
   make(scene, "rt_table", ROULETTE.w, ROULETTE.h, drawRoulette);
-  make(scene, "card_table", 96, 64, drawCardTable);
+  make(scene, "poker_table", POKER.w, POKER.h, drawPoker);
+  make(scene, "pool_table", POOL_TABLE.w, POOL_TABLE.h, drawPool);
   make(scene, "stool", 16, 16, drawStool);
 }

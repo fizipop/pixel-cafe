@@ -1,4 +1,4 @@
-// Floor 2 in one place: wallets, the one-player games and the three shared tables. The Room owns the
+// Floor 2 in one place: wallets, the one-player games, the shared tables (crash, roulette, blackjack, poker, pool) and Pixel Fighter II. The Room owns the
 // players and the seats; it hands this class a small `host` so the arcade can message people and
 // look up who they are, and routes the arcade socket events to `handle()`.
 import { arcadeSeatInfo } from "../src/game/arcadeLayout.ts";
@@ -7,7 +7,10 @@ import type { ArcadeEvent, BoardRow, BoardView, CrashView } from "../src/shared/
 import { fail, type EngineCtx, type Who } from "./arcadeTypes.ts";
 import { BlackjackEngine } from "./blackjack.ts";
 import { CrashEngine } from "./crash.ts";
-import type { Repository } from "./repository.ts";
+import { FighterEngine } from "./fighter.ts";
+import { PokerEngine } from "./poker.ts";
+import { PoolEngine } from "./pool.ts";
+import { LOWER_IS_BETTER, type BoardId, type Repository } from "./repository.ts";
 import { RouletteEngine } from "./roulette.ts";
 import { SoloGames } from "./solo.ts";
 import { Wallets } from "./wallet.ts";
@@ -29,6 +32,9 @@ export class Arcade {
   readonly crash: CrashEngine;
   readonly roulette: RouletteEngine;
   readonly blackjack: BlackjackEngine;
+  readonly poker: PokerEngine;
+  readonly pool: PoolEngine;
+  readonly fighter: FighterEngine;
 
   private repo: Repository;
   private host: ArcadeHost;
@@ -42,6 +48,13 @@ export class Arcade {
     this.crash = new CrashEngine(ctx, () => this.pushCrash(), (who, mult) => this.recordMoon(who, mult));
     this.roulette = new RouletteEngine(ctx, () => this.pushRoulette());
     this.blackjack = new BlackjackEngine(ctx, () => this.pushBlackjack());
+    this.poker = new PokerEngine(ctx, () => this.pushPoker());
+    this.pool = new PoolEngine(ctx, () => this.pushPool());
+    this.fighter = new FighterEngine(ctx, {
+      push: (sockId, view) => this.host.emitTo(sockId, "fg:state", view),
+      onStreak: (who, streak) => { this.solo.record("fighter", who, streak); },
+      grant: (clientId, amount) => this.solo.rewards.grant(clientId, amount),
+    });
   }
 
   // ------------------------------------------------------------ wallet
@@ -65,6 +78,13 @@ export class Arcade {
     for (const w of this.blackjack.sitters) if (w) this.host.emitTo(w.sockId, "bj:state", this.blackjack.view(w.sockId));
   }
 
+  private pushPoker() {
+    for (const w of this.poker.humans) this.host.emitTo(w.sockId, "pk:state", this.poker.view(w.sockId));
+  }
+  private pushPool() {
+    for (const w of this.pool.sitters) if (w) this.host.emitTo(w.sockId, "pl:state", this.pool.view(w.sockId));
+  }
+
   private recordMoon(w: { clientId: string; name: string }, mult: number) {
     const prev = this.repo.getBest("moon", w.clientId);
     if (mult > 1 && (!prev || mult > prev.value)) this.repo.setBest("moon", w.clientId, { name: w.name, value: mult, ts: this.host.now() });
@@ -77,20 +97,25 @@ export class Arcade {
     const w = this.host.who(sockId);
     if (!info || !w) return;
     if (info.table === "bj0") this.blackjack.sit(info.index, w);
-    else this.roulette.join(w);
+    else if (info.table === "rt0") this.roulette.join(w);
+    else if (info.table === "pk0") this.poker.sit(info.index, w);
+    else this.pool.sit(info.index, w);
   }
 
   stoodUp(sockId: string, seatId: string) {
     const info = arcadeSeatInfo(seatId);
     if (!info) return;
     if (info.table === "bj0") { this.blackjack.leave(sockId); this.host.emitTo(sockId, "bj:state", null); }
-    else { this.roulette.leave(sockId); this.host.emitTo(sockId, "roulette:state", null); }
+    else if (info.table === "rt0") { this.roulette.leave(sockId); this.host.emitTo(sockId, "roulette:state", null); }
+    else if (info.table === "pk0") { this.poker.leave(sockId); this.host.emitTo(sockId, "pk:state", null); }
+    else { this.pool.leave(sockId); this.host.emitTo(sockId, "pl:state", null); }
   }
 
   /** The player left Floor 2 (stairs or disconnect): they stop watching the shared tables. */
   leftFloor(sockId: string) {
     this.crash.leave(sockId);
     this.roulette.leave(sockId);
+    this.fighter.leave(sockId);
   }
 
   // ------------------------------------------------------------ requests
@@ -119,8 +144,24 @@ export class Arcade {
       case "bj:hit": return seat?.table === "bj0" ? this.blackjack.hit(w) : fail("Sit at the blackjack table first.");
       case "bj:stand": return seat?.table === "bj0" ? this.blackjack.stand(w) : fail("Sit at the blackjack table first.");
       case "bj:double": return seat?.table === "bj0" ? this.blackjack.double(w) : fail("Sit at the blackjack table first.");
-      case "ice:start": return this.solo.iceStart(w);
-      case "ice:finish": return this.solo.iceFinish(w, x.token, x.score);
+      case "penguin:state": return this.solo.penguinState(w);
+      case "penguin:start": return this.solo.penguinStart(w, x.bet, x.lane);
+      case "penguin:step": return this.solo.penguinStep(w);
+      case "penguin:cashout": return this.solo.penguinCashout(w);
+      case "pk:buyin": return seat?.table === "pk0" ? this.poker.buyIn(w, x.amount) : fail("Sit at the poker table first.");
+      case "pk:act": return seat?.table === "pk0" ? this.poker.act(w, x.action, x.amount) : fail("Sit at the poker table first.");
+      case "pk:bot": return seat?.table === "pk0" ? this.poker.bot(x.add !== false) : fail("Sit at the poker table first.");
+      case "pl:start": return seat?.table === "pl0" ? this.pool.start(w, x.stake, x.ai) : fail("Sit at the pool table first.");
+      case "pl:accept": return seat?.table === "pl0" ? this.pool.accept(w, x.accept) : fail("Sit at the pool table first.");
+      case "pl:shot": return seat?.table === "pl0" ? this.pool.shoot(w, x.angle, x.power) : fail("Sit at the pool table first.");
+      case "pl:resign": return seat?.table === "pl0" ? this.pool.resign(w) : fail("Sit at the pool table first.");
+      case "fg:join": { const r = this.fighter.join(w, x.char, x.ladder); return r; }
+      case "fg:cancel": this.fighter.leave(sockId); this.host.emitTo(sockId, "fg:state", this.fighter.view(sockId)); return { ok: true };
+      case "fg:input": this.fighter.input(sockId, x.bits); return { ok: true };
+      case "racer:start": return this.solo.runStart("racer", w);
+      case "racer:finish": return this.solo.racerFinish(w, x.token, x.totalMs, x.bestLapMs, x.position);
+      case "beat:start": return this.solo.runStart("beat", w);
+      case "beat:finish": return this.solo.beatFinish(w, x.token, x.seq);
       case "arcade:board": return { ok: true, view: this.board(w.clientId) };
       default: return fail("Unknown request.");
     }
@@ -130,20 +171,30 @@ export class Arcade {
     this.crash.tick(now);
     this.roulette.tick(now);
     this.blackjack.tick(now);
+    this.poker.tick(now);
+    this.pool.tick(now);
+  }
+
+  /** The fast clock (about 30 times a second): real-time fights. */
+  tickFast(now: number) {
+    this.fighter.tick(now);
   }
 
   // ------------------------------------------------------------ leaderboards
 
   board(clientId: string): BoardView {
-    const best = (id: "ice" | "moon"): BoardRow[] =>
+    const best = (id: BoardId): BoardRow[] =>
       this.repo
         .listBest(id)
-        .sort((a, b) => b.record.value - a.record.value || a.record.ts - b.record.ts)
+        .sort((a, b) => (LOWER_IS_BETTER[id] ? a.record.value - b.record.value : b.record.value - a.record.value) || a.record.ts - b.record.ts)
         .slice(0, BOARD_ROWS)
         .map((r) => ({ name: r.record.name, value: r.record.value, mine: r.clientId === clientId }));
     return {
-      ice: best("ice"),
+      penguin: best("penguin"),
       moon: best("moon"),
+      drift: best("drift"),
+      beat: best("beat"),
+      fighter: best("fighter"),
       rich: this.wallets.richest(BOARD_ROWS).map((r) => ({ name: r.name, value: r.beans, mine: r.clientId === clientId })),
     };
   }

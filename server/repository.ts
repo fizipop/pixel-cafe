@@ -15,9 +15,12 @@ export type OutfitRecord = { id: string; clientId: string; name: string; pixels:
 export type VoteRecord = { day: string; voter: string; target: string }; // client ids; one vote per voter per day
 /** Cafe Beans: fictional, non-purchasable, non-redeemable tokens. One wallet per device (client id). */
 export type WalletRecord = { beans: number; name: string; topupDay: string; updated: number };
-/** A personal best on an arcade board (Cat Ice Jump score, or biggest To the Moon multiplier). */
+/** A personal best on an arcade board: biggest multiplier, fastest lap (ms, lower is better), top score or longest win streak. */
 export type ScoreRecord = { name: string; value: number; ts: number };
-export type BoardId = "ice" | "moon";
+export type BoardId = "penguin" | "moon" | "drift" | "beat" | "fighter";
+export const BOARD_IDS: BoardId[] = ["penguin", "moon", "drift", "beat", "fighter"];
+/** Fastest lap is the only board where a smaller number is better. */
+export const LOWER_IS_BETTER: Record<BoardId, boolean> = { penguin: false, moon: false, drift: true, beat: false, fighter: false };
 /** Floor 3: an anonymous star wish (`author` is the device id, used only to rate limit and mark "mine"). */
 export type WishRecord = { id: string; text: string; ts: number; author: string };
 /** Floor 3: one group Polaroid pinned to the Rooftop Polaroid Wall (sprites are stored run-length packed). */
@@ -68,15 +71,18 @@ export type PersistedData = {
   outfits: Record<string, OutfitRecord>; // by client id
   votes: VoteRecord[];
   wallets: Record<string, WalletRecord>;
-  ice: Record<string, ScoreRecord>;
+  penguin: Record<string, ScoreRecord>;
   moon: Record<string, ScoreRecord>;
+  drift: Record<string, ScoreRecord>;
+  beat: Record<string, ScoreRecord>;
+  fighter: Record<string, ScoreRecord>;
   wishes: WishRecord[];
   polaroids: PolaroidRecord[];
 };
 
 export const emptyData = (): PersistedData => ({
   version: 1, rumours: [], rumourLikes: {}, guestbook: [], guestbookDays: {}, outfits: {}, votes: [],
-  wallets: {}, ice: {}, moon: {}, wishes: [], polaroids: [],
+  wallets: {}, penguin: {}, moon: {}, drift: {}, beat: {}, fighter: {}, wishes: [], polaroids: [],
 });
 
 const isStr = (v: unknown): v is string => typeof v === "string";
@@ -117,7 +123,7 @@ export function sanitizeData(raw: unknown): PersistedData {
       }
     }
   }
-  for (const board of ["ice", "moon"] as const) {
+  for (const board of BOARD_IDS) {
     const src = raw[board];
     if (!isObj(src)) continue;
     for (const [id, r] of Object.entries(src)) {

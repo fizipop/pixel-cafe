@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { BoardRow, BoardView } from "@/shared/protocol";
 import { unescapeHtml } from "@/shared/text";
+import { fmtTime } from "@/shared/racer";
 import { ArcadeFrame, type ArcadeProps } from "./ui";
 
 const REFRESH_MS = 6000;
@@ -24,7 +25,7 @@ function Column({ title, rows, fmt, emptyText }: { title: string; rows: BoardRow
   );
 }
 
-/** The Leaderboard Kiosk: best Cat Ice Jump runs, biggest To the Moon multipliers, richest Cafe Bean balances. */
+/** The Leaderboard Kiosk: Penguin Cross and To the Moon multipliers, Neon Drift GP fastest laps, Beat Battle scores, Pixel Fighter II win streaks, richest wallets. */
 export default function ArcadeBoard({ net, onClose }: ArcadeProps) {
   const [view, setView] = useState<BoardView | null>(null);
   const [error, setError] = useState("");
@@ -39,13 +40,16 @@ export default function ArcadeBoard({ net, onClose }: ArcadeProps) {
   }, [refresh]);
 
   return (
-    <ArcadeFrame title="Arcade Leaderboards" net={net} onClose={onClose} width="max-w-3xl" accent="text-[#ff9bd0]">
+    <ArcadeFrame title="Arcade Leaderboards" net={net} onClose={onClose} width="max-w-5xl" accent="text-[#ff9bd0]">
       {error && <p className="mb-2 text-ember">{error}</p>}
       {!view && !error && <p className="text-latte">Loading the scores…</p>}
       {view && (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Column title="Cat Ice Jump · top runs" rows={view.ice} fmt={(n) => `${n}`} emptyText="No runs yet. Be the first!" />
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <Column title="Penguin Cross · biggest cash-outs" rows={view.penguin} fmt={(n) => `×${n.toFixed(2)}`} emptyText="Nobody has crossed yet." />
           <Column title="To the Moon · biggest multipliers" rows={view.moon} fmt={(n) => `×${n.toFixed(2)}`} emptyText="Nobody has cashed out yet." />
+          <Column title="Neon Drift GP · fastest laps" rows={view.drift} fmt={fmtTime} emptyText="No laps yet. Hit the track!" />
+          <Column title="Beat Battle · high scores" rows={view.beat} fmt={(n) => n.toLocaleString()} emptyText="No songs played yet." />
+          <Column title="Pixel Fighter II · win streaks" rows={view.fighter} fmt={(n) => `${n} win${n === 1 ? "" : "s"}`} emptyText="No streaks yet. Step up!" />
           <Column title="Richest Cafe Beans" rows={view.rich} fmt={(n) => `🫘 ${n}`} emptyText="Nobody yet." />
         </div>
       )}

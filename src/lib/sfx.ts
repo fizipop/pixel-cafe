@@ -8,13 +8,15 @@ export type SfxName =
   // Floor 2: arcade
   | "elevator" | "spin" | "reelStop" | "cardFlip" | "chip" | "cashout" | "jump" | "splash" | "boom" | "jackpot"
   // Floor 3: rooftop
-  | "twinkle" | "shutter" | "sizzle";
+  | "twinkle" | "shutter" | "sizzle"
+  // Floor 2: fighting, pool, rhythm
+  | "punch" | "block" | "ko" | "clack" | "pocket";
 
 export const SFX_NAMES: SfxName[] = [
   "click", "interact", "sit", "stand", "pour", "froth", "ding", "beans",
   "purr", "meow", "place", "win", "lose", "page", "gift", "emote", "jukebox",
   "elevator", "spin", "reelStop", "cardFlip", "chip", "cashout", "jump", "splash", "boom", "jackpot",
-  "twinkle", "shutter", "sizzle",
+  "twinkle", "shutter", "sizzle", "punch", "block", "ko", "clack", "pocket",
 ];
 
 type Ctx = BaseAudioContext;
@@ -174,6 +176,26 @@ const RECIPES: Record<SfxName, Recipe> = {
     tone(c, out, t + 0.3, { f0: 880, dur: 0.4, vel: 0.16, attack: 0.002 });
     tone(c, out, t + 0.7, { type: "triangle", f0: 90, f1: 150, dur: 0.6, vel: 0.2, attack: 0.08 }); // the lift hum
     burst(c, out, n, t + 0.7, { filter: "lowpass", f0: 300, dur: 0.6, vel: 0.06, attack: 0.1 });
+  },
+  punch: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "lowpass", f0: 1200, f1: 300, dur: 0.12, vel: 0.3, attack: 0.002 });
+    tone(c, out, t, { type: "square", f0: 180, f1: 70, dur: 0.1, vel: 0.2 });
+  },
+  block: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "bandpass", f0: 2400, q: 3, dur: 0.06, vel: 0.2, attack: 0.002 });
+    tone(c, out, t, { type: "triangle", f0: 520, f1: 380, dur: 0.07, vel: 0.12 });
+  },
+  ko: (c, out, t, n) => {
+    tone(c, out, t, { type: "sawtooth", f0: 400, f1: 60, dur: 0.6, vel: 0.2 });
+    burst(c, out, n, t, { filter: "lowpass", f0: 900, f1: 120, dur: 0.5, vel: 0.25 });
+  },
+  clack: (c, out, t) => {
+    tone(c, out, t, { f0: 1900, f1: 1300, dur: 0.035, vel: 0.22, attack: 0.001 });
+    tone(c, out, t + 0.01, { f0: 3100, f1: 2400, dur: 0.025, vel: 0.1, attack: 0.001 });
+  },
+  pocket: (c, out, t, n) => {
+    tone(c, out, t, { type: "triangle", f0: 220, f1: 110, dur: 0.18, vel: 0.2 });
+    burst(c, out, n, t + 0.05, { filter: "lowpass", f0: 600, dur: 0.12, vel: 0.12 });
   },
   twinkle: (c, out, t) => {
     // a little rising glissando of star chimes (a wish being made)

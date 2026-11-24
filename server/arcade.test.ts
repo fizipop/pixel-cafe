@@ -525,38 +525,7 @@ test("blackjack maths: totals, soft aces, payouts", async () => {
   assert.equal(blackjackReturn("lose", 25), 0);
 });
 
-// ------------------------------------------------------------------ ice jump + boards
-
-test("ice jump: score must fit the time played, beans capped, best score kept, board ranks", () => {
-  const { add, up, call, beans, now } = setup();
-  add("a", "Ann", "a"); add("b", "Ben", "b");
-  up("a"); up("b");
-  const t1 = call("a", "ice:start");
-  assert.equal(call("a", "ice:finish", { token: t1.token, score: 5000 }).ok, false, "impossible score");
-  assert.equal(call("a", "ice:finish", { token: t1.token, score: 10 }).ok, false, "a rejected run is spent");
-  const t2 = call("a", "ice:start");
-  now.t += 20_000;
-  const start = beans("a");
-  const fin = call("a", "ice:finish", { token: t2.token, score: 300 });
-  assert.equal(fin.ok, true);
-  assert.equal(fin.beans, 12);
-  assert.equal(fin.best, true);
-  assert.equal(fin.rank, 1);
-  assert.equal(beans("a"), start + 12);
-  assert.equal(call("a", "ice:finish", { token: t2.token, score: 300 }).ok, false, "can't submit twice");
-  const t3 = call("b", "ice:start");
-  now.t += 60_000;
-  const f3 = call("b", "ice:finish", { token: t3.token, score: 1800 });
-  assert.equal(f3.beans, 40, "capped at 40 beans a run");
-  assert.equal(f3.rank, 1);
-  const t4 = call("a", "ice:start");
-  now.t += 5_000;
-  assert.equal(call("a", "ice:finish", { token: t4.token, score: 100 }).best, false, "lower than the personal best");
-  const board = call("a", "arcade:board").view;
-  assert.deepEqual(board.ice.map((r: any) => [r.name, r.value, r.mine]), [["Ben", 1800, false], ["Ann", 300, true]]);
-  assert.equal(board.rich.length, 2);
-  assert.ok(board.rich[0].value >= board.rich[1].value);
-});
+// ------------------------------------------------------------------ persistence
 
 test("arcade scores and wallets survive a restart (JsonFileRepository) and bad data is dropped", () => {
   const dir = mkdtempSync(join(tmpdir(), "cafe-arcade-"));
@@ -566,20 +535,22 @@ test("arcade scores and wallets survive a restart (JsonFileRepository) and bad d
     const s = setup([], repo);
     s.add("a", "Ann", "dev-a", 250);
     s.up("a");
-    s.room.arcade.solo.iceStart({ sockId: "a", clientId: "dev-a", name: "Ann" });
-    repo.setBest("ice", "dev-a", { name: "Ann", value: 420, ts: 1 });
+    repo.setBest("penguin", "dev-a", { name: "Ann", value: 420, ts: 1 });
+    repo.setBest("drift", "dev-a", { name: "Ann", value: 21500, ts: 1 });
     repo.setBest("moon", "dev-a", { name: "Ann", value: 12.34, ts: 2 });
     repo.flush();
     const again = new JsonFileRepository(file, 0);
     assert.equal(again.getWallet("dev-a")?.beans, 250);
-    assert.equal(again.getBest("ice", "dev-a")?.value, 420);
+    assert.equal(again.getBest("penguin", "dev-a")?.value, 420);
+    assert.equal(again.getBest("drift", "dev-a")?.value, 21500);
     assert.equal(again.getBest("moon", "dev-a")?.value, 12.34);
-    const clean = sanitizeData({ wallets: { x: { beans: -5.7, name: "X" }, y: "nope", z: { beans: 10 } }, ice: { q: { name: "Q", value: -1 }, r: { name: "R", value: 5 } }, moon: [] });
+    const clean = sanitizeData({ wallets: { x: { beans: -5.7, name: "X" }, y: "nope", z: { beans: 10 } }, penguin: { q: { name: "Q", value: -1 }, r: { name: "R", value: 5 } }, ice: { old: { name: "Cat", value: 99 } }, moon: [] });
     assert.equal(clean.wallets.x.beans, 0);
     assert.equal(clean.wallets.y, undefined);
     assert.equal(clean.wallets.z, undefined);
-    assert.equal(clean.ice.q, undefined);
-    assert.equal(clean.ice.r.value, 5);
+    assert.equal(clean.penguin.q, undefined);
+    assert.equal(clean.penguin.r.value, 5);
+    assert.equal((clean as Record<string, unknown>).ice, undefined, "the old Cat Ice Jump board is gone");
     assert.deepEqual(clean.moon, {});
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -636,8 +607,8 @@ test("real sockets: floors scope broadcasts, arcade acks work (with and without 
     assert.equal((await walletMsg).beans, spin.beans);
     const joined = await a.timeout(2000).emitWithAck("crash:join");
     assert.equal(joined.view.phase, "wait");
-    const iceStart = await a.timeout(2000).emitWithAck("ice:start");
-    assert.ok(iceStart.token > 0);
+    const raceStart = await a.timeout(2000).emitWithAck("racer:start");
+    assert.ok(raceStart.token > 0);
     assert.equal((await a.timeout(2000).emitWithAck("mines:state")).ok, false);
     assert.equal((await a.timeout(2000).emitWithAck("slots:spin", { bet: 1e9 })).ok, false);
     assert.equal((await a.timeout(2000).emitWithAck("slots:spin")).ok, false, "missing payload is just a refusal");

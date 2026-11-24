@@ -5,7 +5,9 @@ import type { SeatSnapshot } from "../game/seats.ts";
 import type { WorldAction, WorldState } from "../game/worldState.ts";
 import type { Entry } from "../lib/guestbook.ts";
 import type { Floor } from "./floors.ts";
-import type { BjResult, Card, RouletteBet, SlotSymbol } from "./arcade.ts";
+import type { BjResult, Card, PenguinLane, RouletteBet, SlotSymbol } from "./arcade.ts";
+import type { FightMatch } from "./fighter.ts";
+import type { PoolGroup } from "./pool.ts";
 import type { PackedSprite, RoastGrade } from "./rooftop.ts";
 
 // ------------------------------------------------------------------ limits
@@ -86,7 +88,8 @@ export type FloorState = { floor: Floor; x: number; y: number; players: PlayerSt
 // ------------------------------------------------------------------ Floor 2: arcade views
 export type WalletMsg = { beans: number; topup?: number };
 export type BoardRow = { name: string; value: number; mine: boolean };
-export type BoardView = { ice: BoardRow[]; moon: BoardRow[]; rich: BoardRow[] };
+/** Leaderboard kiosk: biggest Penguin Cross and To the Moon multipliers, fastest Neon Drift laps (ms), Beat Battle scores, Pixel Fighter win streaks, richest wallets. */
+export type BoardView = { penguin: BoardRow[]; moon: BoardRow[]; drift: BoardRow[]; beat: BoardRow[]; fighter: BoardRow[]; rich: BoardRow[] };
 
 export type SlotsResult = { reels: SlotSymbol[]; mult: number; win: number; beans: number };
 
@@ -160,8 +163,83 @@ export type PolaroidPerson = { name: string; sprite: PackedSprite };
 /** One photo on the Rooftop Polaroid Wall. */
 export type PolaroidView = { id: string; ts: number; by: string; people: PolaroidPerson[] };
 
-export type IceStart = { token: number };
-export type IceFinish = { beans: number; best: boolean; score: number; rank: number | null };
+// ---- Penguin Cross
+export type PenguinView = {
+  active: boolean;
+  bet: number;
+  lane: PenguinLane;
+  steps: number; // safe tiles crossed so far
+  tiles: number; // tiles between the start and the shore
+  mult: number; // current multiplier (what a cash-out pays)
+  next: number; // multiplier if the next tile holds
+  chance: number; // chance the next tile cracks
+  over?: "cracked" | "cashed" | "shore";
+  payout?: number;
+  beans: number;
+};
+
+// ---- Texas Hold'em
+export type PkSeatView = {
+  name: string; stack: number; bet: number; folded: boolean; allIn: boolean; bot: boolean; dealer: boolean; mine: boolean;
+  cards: Card[]; // your own two cards, "??" for everyone else's while the hand is live, real cards at a showdown
+  hand?: string; // "Full House" etc., at a showdown
+  won?: number;
+};
+export type PokerView = {
+  phase: "wait" | "preflop" | "flop" | "turn" | "river" | "showdown";
+  seats: (PkSeatView | null)[];
+  board: Card[];
+  pot: number;
+  turn: number | null; // seat to act
+  deadline: number | null; // server time (ms) the acting seat runs out of time
+  now: number;
+  mySeat: number; // -1 when you are watching without a seat
+  toCall: number; // beans you need to call
+  minRaise: number; // smallest legal raise-to total this round
+  maxRaise: number; // your all-in total this round
+  canCheck: boolean;
+  bots: number;
+  blinds: { sb: number; bb: number };
+  buyIn: { min: number; max: number };
+  msg: string;
+};
+
+// ---- 8-Ball Pool
+export type PoolBallView = { id: number; x: number; y: number; out: boolean };
+export type PoolView = {
+  phase: "lobby" | "offer" | "play" | "over";
+  players: ({ name: string; bot: boolean; mine: boolean; group: PoolGroup | null } | null)[]; // 2 entries
+  turn: 0 | 1;
+  me: 0 | 1 | -1; // your side, -1 when you are only watching
+  balls: PoolBallView[];
+  /** The shot just taken: replay it from `from` with the shared physics to animate it. */
+  shot: { from: PoolBallView[]; angle: number; power: number; by: 0 | 1; seq: number } | null;
+  stake: number;
+  host: boolean; // you are the one who may start the match
+  vsBot: boolean;
+  deadline: number | null;
+  now: number;
+  winner: 0 | 1 | null;
+  msg: string;
+  returned: number | null; // beans you were paid when the match ended
+};
+
+// ---- Pixel Fighter II
+export type FighterView = {
+  mode: "menu" | "queue" | "fight" | "over";
+  match: FightMatch | null;
+  chars: [number, number];
+  names: [string, string];
+  me: 0 | 1;
+  ladder: number | null; // CPU ladder stage (0-based) or null for a live 1v1
+  streak: number;
+  best: number;
+  result: { won: boolean; beans: number; ladderDone?: boolean } | null;
+};
+
+// ---- Neon Drift GP / Beat Battle: a token proves you started a run, the finish is checked by the server
+export type RunStart = { token: number };
+export type RunFinish = { beans: number; best: boolean; rank: number | null; value: number };
 
 /** Ack for arcade requests: the reply fields on success, a reason on failure. */
 export type Ack<T = object> = ({ ok: true } & T) | { ok: false; reason: string };
@@ -208,8 +286,24 @@ export interface ClientToServer {
   "bj:hit": (ack: (r: Ack) => void) => void;
   "bj:stand": (ack: (r: Ack) => void) => void;
   "bj:double": (ack: (r: Ack) => void) => void;
-  "ice:start": (ack: (r: Ack<IceStart>) => void) => void;
-  "ice:finish": (p: { token: number; score: number }, ack: (r: Ack<IceFinish>) => void) => void;
+  "penguin:state": (ack: (r: Ack<{ view: PenguinView }>) => void) => void;
+  "penguin:start": (p: { bet: number; lane: PenguinLane }, ack: (r: Ack<{ view: PenguinView }>) => void) => void;
+  "penguin:step": (ack: (r: Ack<{ view: PenguinView }>) => void) => void;
+  "penguin:cashout": (ack: (r: Ack<{ view: PenguinView }>) => void) => void;
+  "pk:buyin": (p: { amount: number }, ack: (r: Ack) => void) => void;
+  "pk:act": (p: { action: "fold" | "check" | "call" | "raise"; amount?: number }, ack: (r: Ack) => void) => void;
+  "pk:bot": (p: { add: boolean }, ack: (r: Ack) => void) => void;
+  "pl:start": (p: { stake: number; ai: boolean }, ack: (r: Ack) => void) => void;
+  "pl:accept": (p: { accept: boolean }, ack: (r: Ack) => void) => void;
+  "pl:shot": (p: { angle: number; power: number }, ack: (r: Ack) => void) => void;
+  "pl:resign": (ack: (r: Ack) => void) => void;
+  "fg:join": (p: { char: number; ladder: boolean }, ack: (r: Ack<{ view: FighterView }>) => void) => void;
+  "fg:cancel": (ack: (r: Ack) => void) => void;
+  "fg:input": (p: { bits: number }) => void;
+  "racer:start": (ack: (r: Ack<RunStart>) => void) => void;
+  "racer:finish": (p: { token: number; totalMs: number; bestLapMs: number; position: number }, ack: (r: Ack<RunFinish>) => void) => void;
+  "beat:start": (ack: (r: Ack<RunStart>) => void) => void;
+  "beat:finish": (p: { token: number; seq: string }, ack: (r: Ack<RunFinish & { rankLetter: string; score: number; maxCombo: number }>) => void) => void;
   "arcade:board": (ack: (r: Ack<{ view: BoardView }>) => void) => void;
   // ---- Floor 3 rooftop (every one answers with an Ack)
   "roast:start": (ack: (r: Ack<RoastStart>) => void) => void;
@@ -229,7 +323,9 @@ export type RooftopEvent = (typeof ROOFTOP_EVENTS)[number];
 export const ARCADE_EVENTS = [
   "slots:spin", "mines:state", "mines:start", "mines:reveal", "mines:cashout", "crash:join", "crash:leave", "crash:bet", "crash:cashout",
   "roulette:join", "roulette:leave", "roulette:bet", "roulette:clear", "bj:bet", "bj:hit", "bj:stand", "bj:double",
-  "ice:start", "ice:finish", "arcade:board",
+  "penguin:state", "penguin:start", "penguin:step", "penguin:cashout", "pk:buyin", "pk:act", "pk:bot",
+  "pl:start", "pl:accept", "pl:shot", "pl:resign", "fg:join", "fg:cancel", "fg:input",
+  "racer:start", "racer:finish", "beat:start", "beat:finish", "arcade:board",
 ] as const;
 export type ArcadeEvent = (typeof ARCADE_EVENTS)[number];
 
@@ -256,6 +352,9 @@ export interface ServerToClient {
   "crash:state": (p: CrashView | null) => void; // only while you watch the To the Moon terminal
   "roulette:state": (p: RouletteView | null) => void; // only while you sit or watch at the roulette table
   "bj:state": (p: BlackjackView | null) => void; // only while you sit at the blackjack table
+  "pk:state": (p: PokerView | null) => void; // only while you sit at the poker table
+  "pl:state": (p: PoolView | null) => void; // only while you sit at the pool table
+  "fg:state": (p: FighterView | null) => void; // only while you play Pixel Fighter II
   "stars:wishes": (p: { wishes: StarWishView[]; fresh: string | null }) => void; // only while you are at the telescope; `fresh` = id of a wish that just arrived
   "polaroid:new": (p: PolaroidView) => void; // a photo was just pinned (sent to everyone on Floor 3)
 }
