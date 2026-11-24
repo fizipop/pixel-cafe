@@ -4,11 +4,14 @@
 
 export type SfxName =
   | "click" | "interact" | "sit" | "stand" | "pour" | "froth" | "ding" | "beans"
-  | "purr" | "meow" | "place" | "win" | "lose" | "page" | "gift" | "emote" | "jukebox";
+  | "purr" | "meow" | "place" | "win" | "lose" | "page" | "gift" | "emote" | "jukebox"
+  // Floor 2: arcade
+  | "elevator" | "spin" | "reelStop" | "cardFlip" | "chip" | "cashout" | "jump" | "splash" | "boom" | "jackpot";
 
 export const SFX_NAMES: SfxName[] = [
   "click", "interact", "sit", "stand", "pour", "froth", "ding", "beans",
   "purr", "meow", "place", "win", "lose", "page", "gift", "emote", "jukebox",
+  "elevator", "spin", "reelStop", "cardFlip", "chip", "cashout", "jump", "splash", "boom", "jackpot",
 ];
 
 type Ctx = BaseAudioContext;
@@ -162,6 +165,60 @@ const RECIPES: Record<SfxName, Recipe> = {
   },
   emote: (c, out, t) => {
     tone(c, out, t, { f0: 600, f1: 1000, dur: 0.07, vel: 0.2 });
+  },
+  elevator: (c, out, t, n) => {
+    tone(c, out, t, { f0: 1175, dur: 0.35, vel: 0.2, attack: 0.002 }); // the "ding"
+    tone(c, out, t + 0.3, { f0: 880, dur: 0.4, vel: 0.16, attack: 0.002 });
+    tone(c, out, t + 0.7, { type: "triangle", f0: 90, f1: 150, dur: 0.6, vel: 0.2, attack: 0.08 }); // the lift hum
+    burst(c, out, n, t + 0.7, { filter: "lowpass", f0: 300, dur: 0.6, vel: 0.06, attack: 0.1 });
+  },
+  spin: (c, out, t, n) => {
+    // a ratchet that slows down: wheel / reel spinning
+    for (let i = 0; i < 12; i++) {
+      const at = t + i * 0.05 + i * i * 0.0035;
+      tone(c, out, at, { type: "square", f0: 900 - i * 25, dur: 0.03, vel: 0.07 });
+      if (i % 2 === 0) burst(c, out, n, at, { filter: "bandpass", f0: 2400, q: 2, dur: 0.025, vel: 0.08 });
+    }
+  },
+  reelStop: (c, out, t, n) => {
+    tone(c, out, t, { type: "square", f0: 260, f1: 110, dur: 0.1, vel: 0.2 });
+    burst(c, out, n, t, { filter: "lowpass", f0: 900, dur: 0.07, vel: 0.14 });
+  },
+  cardFlip: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "bandpass", f0: 3800, f1: 1800, q: 1.1, dur: 0.1, vel: 0.28, attack: 0.008 });
+    burst(c, out, n, t + 0.07, { filter: "highpass", f0: 5000, dur: 0.04, vel: 0.1 });
+    tone(c, out, t + 0.085, { f0: 420, f1: 260, dur: 0.04, vel: 0.1 });
+  },
+  chip: (c, out, t, n) => {
+    tone(c, out, t, { f0: 2100, f1: 1500, dur: 0.045, vel: 0.2 });
+    tone(c, out, t + 0.045, { f0: 2600, f1: 1900, dur: 0.05, vel: 0.14 });
+    burst(c, out, n, t, { filter: "bandpass", f0: 3000, q: 2, dur: 0.03, vel: 0.1 });
+  },
+  cashout: (c, out, t) => {
+    // cash-register "cha-ching": two bell strikes then a coin shower
+    tone(c, out, t, { f0: 1568, dur: 0.12, vel: 0.2, attack: 0.002 });
+    tone(c, out, t + 0.09, { f0: 2093, dur: 0.5, vel: 0.22, attack: 0.002 });
+    tone(c, out, t + 0.09, { f0: 3136, dur: 0.3, vel: 0.08, attack: 0.002 });
+    [0.26, 0.31, 0.36, 0.41, 0.45].forEach((d, i) => tone(c, out, t + d, { f0: 1760 + i * 180, f1: 1300 + i * 140, dur: 0.07, vel: 0.1 }));
+  },
+  jump: (c, out, t) => {
+    tone(c, out, t, { f0: 300, f1: 680, dur: 0.13, vel: 0.22 });
+    tone(c, out, t + 0.05, { type: "triangle", f0: 700, f1: 1100, dur: 0.08, vel: 0.1 });
+  },
+  splash: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "lowpass", f0: 2600, f1: 300, q: 0.7, dur: 0.5, vel: 0.35, attack: 0.01 });
+    tone(c, out, t, { f0: 200, f1: 70, dur: 0.25, vel: 0.2 });
+  },
+  boom: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "lowpass", f0: 900, f1: 90, q: 0.8, dur: 0.6, vel: 0.5, attack: 0.005 });
+    tone(c, out, t, { type: "triangle", f0: 150, f1: 38, dur: 0.5, vel: 0.4 });
+  },
+  jackpot: (c, out, t) => {
+    [523, 659, 784, 1047, 1319, 1568, 2093].forEach((f, i) => {
+      tone(c, out, t + i * 0.07, { f0: f, dur: 0.3, vel: 0.18 });
+      tone(c, out, t + i * 0.07, { type: "triangle", f0: f * 2, dur: 0.2, vel: 0.06 });
+    });
+    tone(c, out, t + 0.55, { f0: 2093, dur: 0.9, vel: 0.2, attack: 0.002 });
   },
   jukebox: (c, out, t, n) => {
     burst(c, out, n, t, { filter: "highpass", f0: 2500, dur: 0.3, vel: 0.12, attack: 0.02 });

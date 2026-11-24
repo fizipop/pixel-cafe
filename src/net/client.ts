@@ -7,9 +7,11 @@ import { io, type Socket } from "socket.io-client";
 import type { DrinkKind } from "@/lib/drinks";
 import { unescapeHtml } from "@/shared/text";
 import type { WorldAction, WorldState } from "@/game/worldState";
+import type { Floor } from "@/shared/floors";
 import {
   playerOccupant,
-  type GuestbookView, type InitPayload, type OutfitView, type Result, type RumourView, type ServerToClient, type TableInfo,
+  type Ack, type ArcadeEvent, type BlackjackView, type CrashView, type FloorState, type GuestbookView, type InitPayload, type OutfitView,
+  type Result, type RouletteView, type RumourView, type ServerToClient, type TableInfo, type WalletMsg,
 } from "@/shared/protocol";
 
 const CLIENT_ID_KEY = "pixelcafe.clientId";
@@ -49,6 +51,18 @@ export class NetClient {
   /** Socket ids wearing today's #1 outfit crown. */
   crowns: string[];
   closed = false;
+  /** Which floor you are on (replaced by the server's `floor:state`). */
+  floor: Floor;
+  /** Your Cafe Beans (fictional currency); the server is the source of truth. */
+  beans: number;
+  /** Set when a daily starter top-up lands; `id` changes every time so the HUD can show it once. */
+  topupNote: { id: number; amount: number } | null = null;
+  /** Live views of the shared Floor 2 tables; null when you aren't taking part. Replaced, never mutated. */
+  crash: CrashView | null = null;
+  roulette: RouletteView | null = null;
+  bj: BlackjackView | null = null;
+  private topupSeq = 0;
+  private held: number | null = null;
   /** socket id -> display name, for everyone we've seen (used by the table game UI). */
   private names = new Map<string, string>();
 
@@ -66,6 +80,9 @@ export class NetClient {
     this.table = init.table;
     this.locks = init.locks;
     this.crowns = init.crowns;
+    this.floor = init.floor;
+    this.beans = init.beans;
+    if (init.topup) this.topupNote = { id: ++this.topupSeq, amount: init.topup };
     for (const p of init.players) this.names.set(p.id, unescapeHtml(p.name));
 
     socket.on("player:joined", (p: { id: string; name: string }) => this.names.set(p.id, unescapeHtml(p.name)));
@@ -75,6 +92,20 @@ export class NetClient {
     socket.on("table:info", (p: TableInfo | null) => { this.table = p; this.emit(); });
     socket.on("locks", (p: string[]) => { this.locks = p; this.emit(); });
     socket.on("crowns", (p: string[]) => { this.crowns = p; this.emit(); });
+    socket.on("floor:state", (p: FloorState) => {
+      this.floor = p.floor;
+      for (const q of p.players) this.names.set(q.id, unescapeHtml(q.name));
+      if (p.floor !== 2) { this.crash = null; this.roulette = null; this.bj = null; }
+      this.emit();
+    });
+    socket.on("wallet", (p: WalletMsg) => {
+      this.beans = p.beans;
+      if (p.topup) this.topupNote = { id: ++this.topupSeq, amount: p.topup };
+      this.emit();
+    });
+    socket.on("crash:state", (p: CrashView | null) => { this.crash = p; this.emit(); });
+    socket.on("roulette:state", (p: RouletteView | null) => { this.roulette = p; this.emit(); });
+    socket.on("bj:state", (p: BlackjackView | null) => { this.bj = p; this.emit(); });
     socket.on("disconnect", () => {
       this.closed = true;
       this.emit();
@@ -83,7 +114,7 @@ export class NetClient {
   }
 
   /** Connect and join. Resolves null (never throws) if the server can't be reached in time. */
-  static connect(opts: { name: string; pixels: string[]; timeoutMs?: number; url?: string }): Promise<NetClient | null> {
+  static connect(opts: { name: string; pixels: string[]; beans?: number; timeoutMs?: number; url?: string }): Promise<NetClient | null> {
     return new Promise((resolve) => {
       const socket = io(opts.url ?? socketUrl(), {
         transports: ["websocket"],
@@ -103,7 +134,7 @@ export class NetClient {
       socket.on("connect", () => {
         socket.timeout(3000).emit(
           "join",
-          { clientId: clientId(), name: opts.name, pixels: opts.pixels },
+          { clientId: clientId(), name: opts.name, pixels: opts.pixels, beans: opts.beans },
           (err: Error | null, res?: { ok: true; init: InitPayload } | { ok: false; reason: string }) => {
             if (err || !res || !res.ok) return finish(null);
             finish(new NetClient(socket, res.init));
@@ -112,6 +143,11 @@ export class NetClient {
       });
     });
   }
+
+  /** The balance to SHOW: frozen at a game's pre-result value while a reel/wheel/card animation plays, so the HUD never spoils it. */
+  get shownBeans() { return this.held ?? this.beans; }
+  hold(value: number) { this.held = value; this.emit(); }
+  release() { if (this.held !== null) { this.held = null; this.emit(); } }
 
   /** Display name for an occupant id ("player:<id>" or "npc:<name>"). */
   nameOf(occupant: string | null): string {
@@ -164,6 +200,19 @@ export class NetClient {
     });
   }
   sit(seatId: string) { return this.ask("sit", { seatId }); }
+  goFloor(floor: Floor) { return this.ask("floor:go", { floor }); }
+  /** Beans from a drink you made or gave away (the server caps and rate limits these). */
+  earn(amount: number) { if (!this.closed) this.socket.emit("beans:earn", { amount }); }
+  /** A Floor 2 mini-game request. Resolves with the server's answer (never throws). */
+  call<T = object>(event: ArcadeEvent, payload?: unknown): Promise<Ack<T>> {
+    return new Promise((resolve) => {
+      if (this.closed) return resolve({ ok: false, reason: "Disconnected from the cafe." });
+      const done = (err: Error | null, res?: Ack<T>) => resolve(err || !res ? { ok: false, reason: "The arcade didn't answer. Try again." } : res);
+      const t = this.socket.timeout(4000);
+      if (payload === undefined) t.emit(event, done);
+      else t.emit(event, payload, done);
+    });
+  }
   chat(text: string) { return this.ask("chat", { text }); }
   rumourPost(text: string) { return this.ask("rumour:post", { text }); }
   guestbookSign(text: string) { return this.ask("guestbook:sign", { text }); }

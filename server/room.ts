@@ -3,18 +3,22 @@
 //
 // Players are addressed by socket id. In seat/table state they appear as the occupant id
 // "player:<socket id>" (NPCs are "npc:<name>"), the same ids the client uses.
-import { SeatState } from "../src/game/seats.ts";
+import { SeatState, type SeatSnapshot } from "../src/game/seats.ts";
+import { arcadeSeatInfo } from "../src/game/arcadeLayout.ts";
 import { GAME_NPC, GAME_SEAT_PREFIX, NPC_SEATS, PRIVATE_CAPACITY, PRIVATE_TABLES, buildSeats, privateTableOf } from "../src/game/layout.ts";
 import { WorldStore, newWorld, type WorldAction } from "../src/game/worldState.ts";
 import { chooseMove, type Side } from "../src/game/tictactoe.ts";
 import { MOODS, WEATHERS } from "../src/lib/moods.ts";
 import { DRINKS, type DrinkKind } from "../src/lib/drinks.ts";
-import { SPAWN, WORLD_H, WORLD_W } from "../src/game/constants.ts";
+import { SPAWN } from "../src/game/constants.ts";
 import { cleanLine, escapeHtml } from "../src/shared/text.ts";
 import {
   CHAT_COOLDOWN_MS, CHAT_MAX, CHAT_RADIUS, NAME_MAX, SIT_REACH, playerOccupant,
   type ChatMessage, type InitPayload, type JoinPayload, type MoveUpdate, type OutfitView, type PlayerState, type Result, type TableInfo,
 } from "../src/shared/protocol.ts";
+import { STAIRS, STAIRS_REACH, clampToFloor, floorOfSeat, type Floor } from "../src/shared/floors.ts";
+import type { ArcadeEvent } from "../src/shared/protocol.ts";
+import { Arcade } from "./arcade.ts";
 import { Guestbook, RumourBoard } from "./boards.ts";
 import { OutfitBoard } from "./outfits.ts";
 import { MemoryRepository, type Repository } from "./repository.ts";
@@ -37,13 +41,15 @@ type Player = {
   lastProfile: number;
   dirty: boolean;
   tableKey: string; // last private-table info sent to this player (to avoid repeats)
+  floor: Floor;
 };
 
 export type RoomOptions = {
   now?: () => number;
   schedule?: (fn: () => void, ms: number) => void; // for the NPC's thinking delay
   maxPlayers?: number;
-  repo?: Repository; // where rumours, guestbook and outfit votes are stored (default: in memory)
+  repo?: Repository; // where rumours, guestbook, outfit votes, wallets and arcade scores are stored (default: in memory)
+  rng?: () => number; // randomness for the arcade games (tests pass a seeded one)
 };
 
 export const MAX_PLAYERS = 40;
@@ -65,6 +71,7 @@ export class Room {
   readonly guestbook: Guestbook;
   readonly outfits: OutfitBoard;
   readonly repo: Repository;
+  readonly arcade: Arcade;
   /** Locked private tables -> socket ids allowed to (re)take a seat (those seated when it was locked). */
   readonly locked = new Map<string, Set<string>>();
 
@@ -84,6 +91,14 @@ export class Room {
     this.rumours = new RumourBoard(this.repo, this.now);
     this.guestbook = new Guestbook(this.repo, this.now);
     this.outfits = new OutfitBoard(this.repo, this.now);
+    this.arcade = new Arcade(this.repo, {
+      now: () => this.now(),
+      rng: opts.rng ?? Math.random,
+      emitTo: (id, event, payload) => this.players.get(id)?.conn.emit(event, payload),
+      socketsOf: (clientId) => [...this.players.values()].filter((q) => q.clientId === clientId).map((q) => q.conn.id),
+      who: (id) => { const q = this.players.get(id); return q ? { sockId: id, clientId: q.clientId, name: q.state.name } : undefined; },
+      floorOf: (id) => this.players.get(id)?.floor,
+    });
     for (const [seatId, who] of Object.entries(NPC_SEATS)) this.seats.sit(who, seatId); // NPCs' chairs are taken
     this.world = new WorldStore(newWorld());
     this.world.dispatch({ type: "ttt", action: { type: "join", side: "O", by: GAME_NPC } }); // Theo plays "O"
@@ -97,6 +112,20 @@ export class Room {
 
   private all(event: string, payload?: unknown, exceptId?: string) {
     for (const p of this.players.values()) if (p.conn.id !== exceptId) p.conn.emit(event, payload);
+  }
+
+  /** Send to everyone on one floor (players only see and hear people on their own floor). */
+  private floorAll(floor: Floor, event: string, payload?: unknown, exceptId?: string) {
+    for (const p of this.players.values()) if (p.floor === floor && p.conn.id !== exceptId) p.conn.emit(event, payload);
+  }
+
+  /** Seat occupancy of one floor (seat ids are unique across floors, so we just filter). */
+  private seatsFor(floor: Floor): SeatSnapshot {
+    return Object.fromEntries(Object.entries(this.seats.snapshot()).filter(([seatId]) => floorOfSeat(seatId) === floor));
+  }
+
+  private pushSeats(floor: Floor) {
+    this.floorAll(floor, "seats", this.seatsFor(floor));
   }
 
   private get(id: string) {
@@ -122,12 +151,14 @@ export class Room {
     if (!clientId) return { ok: false, reason: "Missing client id." };
     const name = escapeHtml(cleanLine(typeof payload.name === "string" ? payload.name : "").slice(0, NAME_MAX)) || "Guest";
 
-    const state: PlayerState = { id: conn.id, name, pixels, x: SPAWN.x, y: SPAWN.y, flip: false, moving: false, drink: null };
-    const others = [...this.players.values()].map((p) => p.state);
-    this.players.set(conn.id, { conn, clientId, state, seat: null, lastChat: 0, lastEmote: 0, lastProfile: 0, dirty: false, tableKey: "" });
+    const state: PlayerState = { id: conn.id, name, pixels, x: SPAWN.x, y: SPAWN.y, flip: false, moving: false, drink: null, floor: 1 };
+    const others = [...this.players.values()].filter((p) => p.floor === 1).map((p) => p.state); // everyone starts on Floor 1
+    this.players.set(conn.id, { conn, clientId, state, seat: null, lastChat: 0, lastEmote: 0, lastProfile: 0, dirty: false, tableKey: "", floor: 1 });
+    this.arcade.wallets.ensure(clientId, name, typeof payload.beans === "number" ? payload.beans : 0);
+    const topup = this.arcade.wallets.topup(clientId);
     this.outfits.seen(clientId, name, pixels);
 
-    this.all("player:joined", state, conn.id);
+    this.floorAll(1, "player:joined", state, conn.id);
     this.all("online", { count: this.online });
     this.system(`${name} entered the cafe`);
     this.pushCrowns();
@@ -136,7 +167,7 @@ export class Room {
       init: {
         selfId: conn.id,
         players: others,
-        seats: this.seats.snapshot(),
+        seats: this.seatsFor(1),
         world: this.world.getState(),
         rumours: this.rumours.view(clientId),
         guestbook: this.guestbook.view(clientId),
@@ -144,6 +175,9 @@ export class Room {
         locks: [...this.locked.keys()],
         table: null,
         crowns: this.crownedSockets(),
+        floor: 1,
+        beans: this.arcade.wallets.balance(clientId),
+        ...(topup ? { topup } : {}),
       },
     };
   }
@@ -152,9 +186,10 @@ export class Room {
     const p = this.get(id);
     if (!p) return;
     const hadSeat = this.releaseSeat(id);
+    this.arcade.leftFloor(id);
     this.players.delete(id);
-    this.all("player:left", { id });
-    if (hadSeat) this.all("seats", this.seats.snapshot());
+    this.floorAll(p.floor, "player:left", { id });
+    if (hadSeat) this.pushSeats(p.floor);
     this.pushTables();
     this.pushCrowns();
     this.all("online", { count: this.online });
@@ -166,8 +201,9 @@ export class Room {
   move(id: string, d: { x: number; y: number; flip: boolean; moving: boolean }) {
     const p = this.get(id);
     if (!p || p.seat || !finite(d?.x) || !finite(d?.y)) return; // seated players don't walk
-    p.state.x = Math.min(WORLD_W, Math.max(0, d.x));
-    p.state.y = Math.min(WORLD_H, Math.max(0, d.y));
+    const at = clampToFloor(p.floor, d.x, d.y);
+    p.state.x = at.x;
+    p.state.y = at.y;
     p.state.flip = !!d.flip;
     p.state.moving = !!d.moving;
     p.dirty = true;
@@ -181,9 +217,11 @@ export class Room {
       p.dirty = false;
       moved.push({ id: p.state.id, x: p.state.x, y: p.state.y, flip: p.state.flip, moving: p.state.moving });
     }
+    this.arcade.tick(this.now());
     if (moved.length === 0) return;
     for (const p of this.players.values()) {
-      const others = moved.filter((m) => m.id !== p.state.id);
+      // you only see movement on your own floor
+      const others = moved.filter((m) => m.id !== p.state.id && this.players.get(m.id)?.floor === p.floor);
       if (others.length) p.conn.emitVolatile("moves", others);
     }
   }
@@ -199,7 +237,7 @@ export class Room {
     p.lastProfile = t;
     p.state.pixels = pixels;
     this.outfits.seen(p.clientId, p.state.name, pixels);
-    this.all("player:profile", { id, pixels }, id);
+    this.floorAll(p.floor, "player:profile", { id, pixels }, id);
   }
 
   drink(id: string, d: { kind: unknown }) {
@@ -208,7 +246,7 @@ export class Room {
     const kind = d?.kind === null ? null : isDrink(d?.kind) ? d.kind : undefined;
     if (kind === undefined) return;
     p.state.drink = kind;
-    this.all("player:drink", { id, kind }, id);
+    this.floorAll(p.floor, "player:drink", { id, kind }, id);
   }
 
   emote(id: string, d: { n: unknown }) {
@@ -217,7 +255,7 @@ export class Room {
     const t = this.now();
     if (t - p.lastEmote < 400) return;
     p.lastEmote = t;
-    this.all("emote", { id, n: d.n }, id);
+    this.floorAll(p.floor, "emote", { id, n: d.n }, id);
   }
 
   // -------------------------------------------------------------- seats
@@ -231,6 +269,7 @@ export class Room {
     if (!p) return { ok: false, reason: "Not in the cafe." };
     const seat = typeof d?.seatId === "string" ? this.seatMap.get(d.seatId) : undefined;
     if (!seat) return { ok: false, reason: "No such seat." };
+    if (floorOfSeat(seat.id) !== p.floor) return { ok: false, reason: "That seat is on another floor." };
     if (Math.hypot(p.state.x - seat.exit.x, p.state.y - seat.exit.y) > SIT_REACH && p.seat !== seat.id) {
       return { ok: false, reason: "That seat is too far away." };
     }
@@ -243,13 +282,15 @@ export class Room {
     }
     if (!this.seats.sit(who, seat.id)) return { ok: false, reason: "Someone just took that seat." };
     if (before && before !== seat.id && this.isGameSeat(before) && !this.isGameSeat(seat.id)) this.leaveTable(who);
+    if (before && before !== seat.id && arcadeSeatInfo(before)) this.arcade.stoodUp(id, before);
     p.seat = seat.id;
     p.state.x = seat.x;
     p.state.y = seat.y;
     p.state.moving = false;
     p.dirty = true;
-    this.all("seats", this.seats.snapshot());
+    this.pushSeats(p.floor);
     if (this.isGameSeat(seat.id)) this.joinTable(who);
+    if (arcadeSeatInfo(seat.id)) this.arcade.seated(id, seat.id);
     this.pushTables();
     return { ok: true };
   }
@@ -261,7 +302,7 @@ export class Room {
     if (!this.releaseSeat(id)) return;
     const seat = seatId ? this.seatMap.get(seatId) : undefined;
     if (seat) { p.state.x = seat.exit.x; p.state.y = seat.exit.y; p.dirty = true; }
-    this.all("seats", this.seats.snapshot());
+    this.pushSeats(p.floor);
     this.pushTables();
   }
 
@@ -314,6 +355,7 @@ export class Room {
     if (p) p.seat = null;
     if (seatId === undefined) return false;
     if (this.isGameSeat(seatId)) this.leaveTable(who);
+    else if (arcadeSeatInfo(seatId)) this.arcade.stoodUp(id, seatId);
     return true;
   }
 
@@ -396,11 +438,52 @@ export class Room {
       for (const q of this.seatedAt(tid)) q.conn.emit("chat", msg);
     } else {
       for (const q of this.players.values()) {
+        if (q.floor !== p.floor) continue; // floors are separate rooms
         if (privateTableOf(q.seat)) continue; // people at a private table only hear their table
         if (q === p || Math.hypot(q.state.x - p.state.x, q.state.y - p.state.y) <= CHAT_RADIUS) q.conn.emit("chat", msg);
       }
     }
     return { ok: true };
+  }
+
+  // ------------------------------------------------------------- floors
+
+  /** Take the stairs/elevator (you must be standing at it, not seated). Everything on the other floor is scoped away. */
+  goFloor(id: string, d: { floor: unknown }): Result {
+    const p = this.get(id);
+    if (!p) return { ok: false, reason: "Not in the cafe." };
+    const to = d?.floor;
+    if (to !== 1 && to !== 2) return { ok: false, reason: "No such floor." };
+    if (to === p.floor) return { ok: false, reason: "You are already on that floor." };
+    if (p.seat) return { ok: false, reason: "Stand up first." };
+    const from = STAIRS[p.floor];
+    if (Math.hypot(p.state.x - from.spot.x, p.state.y - from.spot.y) > STAIRS_REACH) return { ok: false, reason: "Walk up to the elevator first." };
+
+    this.floorAll(p.floor, "player:left", { id }, id);
+    this.arcade.leftFloor(id);
+    p.floor = to;
+    p.state.floor = to;
+    p.state.x = STAIRS[to].arrive.x;
+    p.state.y = STAIRS[to].arrive.y;
+    p.state.moving = false;
+    p.dirty = false;
+    const others = [...this.players.values()].filter((q) => q.floor === to && q.conn.id !== id);
+    this.floorAll(to, "player:joined", p.state, id);
+    p.conn.emit("floor:state", { floor: to, x: p.state.x, y: p.state.y, players: others.map((q) => q.state), seats: this.seatsFor(to) });
+    return { ok: true };
+  }
+
+  // ------------------------------------------------------- Cafe Beans & arcade
+
+  /** Beans from a drink you made or a drink you gifted (capped and rate limited, see wallet.ts). */
+  earn(id: string, d: { amount: unknown }) {
+    const p = this.get(id);
+    if (p && this.arcade.wallets.earn(p.clientId, d?.amount) > 0) this.arcade.pushWallet(p.clientId);
+  }
+
+  /** Every Floor 2 mini-game request comes through here (see server/arcade.ts). */
+  arcadeEvent(id: string, event: ArcadeEvent, d: unknown): unknown {
+    return this.arcade.handle(id, event, d, this.get(id)?.seat ?? null);
   }
 
   // ------------------------------------------------- rumours & guestbook

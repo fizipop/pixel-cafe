@@ -1,5 +1,6 @@
 // Where everything is in the cafe. One place to change the floor plan.
 import { TILE, WALL_H } from "./constants.ts";
+import { arcadeSeats } from "./arcadeLayout.ts";
 
 // [col, row] of each table's top-left tile (tables are 2 tiles wide)
 export const TABLES: [number, number][] = [
@@ -101,6 +102,7 @@ export function buildSeats(): Seat[] {
     });
   }
   seats.push(...privateSeats());
+  seats.push(...arcadeSeats()); // Floor 2: blackjack + roulette stools
   return seats;
 }
 

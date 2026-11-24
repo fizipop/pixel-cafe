@@ -12,6 +12,8 @@ export type CafeHandle = {
   setInputEnabled: (enabled: boolean) => void;
   serveDrink: (kind: DrinkKind, rating: Rating) => void;
   talkToBarista: () => void;
+  /** Stand up from the table you are sitting at (used by the blackjack / roulette windows). */
+  standUp: () => void;
   destroy: () => void;
 };
 
@@ -53,6 +55,7 @@ export function createCafeGame(
     setInputEnabled: (enabled) => scene()?.setInputEnabled(enabled),
     serveDrink: (kind, rating) => scene()?.serveDrink(kind, rating),
     talkToBarista: () => scene()?.talkToBarista(),
+    standUp: () => scene()?.standUpFromHud(),
     destroy: () => {
       if (destroyed) return;
       destroyed = true;

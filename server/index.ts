@@ -1,7 +1,7 @@
 // Pixel Cafe multiplayer server. Run with `npm run dev:server` (or `npm run dev:all`).
 //   PORT=3001            port to listen on
 //   CLIENT_ORIGIN=...    comma separated allowed web origins (default: any, handy for local testing)
-//   DATA_FILE=...        where rumours, guestbook and outfit votes are saved (default: server/data.json)
+//   DATA_FILE=...        where rumours, guestbook, outfit votes, bean wallets and arcade scores are saved (default: server/data.json)
 import { fileURLToPath } from "node:url";
 import { createCafeServer } from "./app.ts";
 import { JsonFileRepository } from "./repository.ts";

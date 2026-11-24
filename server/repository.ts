@@ -12,6 +12,11 @@ export type RumourRecord = { id: string; text: string; createdAt: number; author
 export type GuestRecord = { id: string; name: string; text: string; createdAt: number; author: string };
 export type OutfitRecord = { id: string; clientId: string; name: string; pixels: string[]; lastSeen: number };
 export type VoteRecord = { day: string; voter: string; target: string }; // client ids; one vote per voter per day
+/** Cafe Beans: fictional, non-purchasable, non-redeemable tokens. One wallet per device (client id). */
+export type WalletRecord = { beans: number; name: string; topupDay: string; updated: number };
+/** A personal best on an arcade board (Cat Ice Jump score, or biggest To the Moon multiplier). */
+export type ScoreRecord = { name: string; value: number; ts: number };
+export type BoardId = "ice" | "moon";
 
 export interface Repository {
   // rumours (newest first)
@@ -32,6 +37,13 @@ export interface Repository {
   listVotes(day: string): VoteRecord[];
   addVote(v: VoteRecord): void;
   removeVotesBefore(day: string): void;
+  // Floor 2: bean wallets and arcade high scores
+  getWallet(clientId: string): WalletRecord | undefined;
+  setWallet(clientId: string, w: WalletRecord): void;
+  listWallets(): { clientId: string; wallet: WalletRecord }[];
+  getBest(board: BoardId, clientId: string): ScoreRecord | undefined;
+  setBest(board: BoardId, clientId: string, r: ScoreRecord): void;
+  listBest(board: BoardId): { clientId: string; record: ScoreRecord }[];
   /** Write anything pending to durable storage (no-op for memory). */
   flush(): void;
 }
@@ -44,10 +56,14 @@ export type PersistedData = {
   guestbookDays: Record<string, string>;
   outfits: Record<string, OutfitRecord>; // by client id
   votes: VoteRecord[];
+  wallets: Record<string, WalletRecord>;
+  ice: Record<string, ScoreRecord>;
+  moon: Record<string, ScoreRecord>;
 };
 
 export const emptyData = (): PersistedData => ({
   version: 1, rumours: [], rumourLikes: {}, guestbook: [], guestbookDays: {}, outfits: {}, votes: [],
+  wallets: {}, ice: {}, moon: {},
 });
 
 const isStr = (v: unknown): v is string => typeof v === "string";
@@ -80,6 +96,20 @@ export function sanitizeData(raw: unknown): PersistedData {
   }
   for (const v of list(raw.votes)) {
     if (isObj(v) && isStr(v.day) && isStr(v.voter) && isStr(v.target)) out.votes.push({ day: v.day, voter: v.voter, target: v.target });
+  }
+  if (isObj(raw.wallets)) {
+    for (const [id, w] of Object.entries(raw.wallets)) {
+      if (isObj(w) && isNum(w.beans) && isStr(w.name)) {
+        out.wallets[id] = { beans: Math.max(0, Math.floor(w.beans)), name: w.name, topupDay: isStr(w.topupDay) ? w.topupDay : "", updated: isNum(w.updated) ? w.updated : 0 };
+      }
+    }
+  }
+  for (const board of ["ice", "moon"] as const) {
+    const src = raw[board];
+    if (!isObj(src)) continue;
+    for (const [id, r] of Object.entries(src)) {
+      if (isObj(r) && isStr(r.name) && isNum(r.value) && r.value >= 0) out[board][id] = { name: r.name, value: r.value, ts: isNum(r.ts) ? r.ts : 0 };
+    }
   }
   return out;
 }
@@ -148,6 +178,19 @@ export class MemoryRepository implements Repository {
     this.data.votes = keep;
     this.changed();
   }
+
+  getWallet(clientId: string) { return this.data.wallets[clientId]; }
+  setWallet(clientId: string, w: WalletRecord) {
+    this.data.wallets[clientId] = w;
+    this.changed();
+  }
+  listWallets() { return Object.entries(this.data.wallets).map(([clientId, wallet]) => ({ clientId, wallet })); }
+  getBest(board: BoardId, clientId: string) { return this.data[board][clientId]; }
+  setBest(board: BoardId, clientId: string, r: ScoreRecord) {
+    this.data[board][clientId] = r;
+    this.changed();
+  }
+  listBest(board: BoardId) { return Object.entries(this.data[board]).map(([clientId, record]) => ({ clientId, record })); }
 
   flush() {}
 }

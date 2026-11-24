@@ -10,13 +10,17 @@ import {
 import { SeatState, mergeRemoteSeats, sitPose } from "./seats";
 import { RemotePlayer } from "./remotePlayers";
 import type { NetClient } from "@/net/client";
-import { MOVE_HZ, type PlayerState } from "@/shared/protocol";
+import { MOVE_HZ, type FloorState, type PlayerState } from "@/shared/protocol";
 import { unescapeHtml } from "@/shared/text";
 import { NavGrid, type Rect } from "./pathing";
 import { Bubbles } from "./bubbles";
 import { HeldCup, type DrinkKind } from "./heldCup";
 import { NPC_SPECS, Npc, type NpcWorld } from "./npcs";
 import { buildPropTextures, JUKEBOX } from "./props";
+import { buildArcadeTextures } from "./arcadeArt";
+import { buildArcadeFloor } from "./arcadeFloor";
+import { MACHINES, ROULETTE_WATCH, arcadeSeatInfo, type ArcadeGame, type Machine } from "./arcadeLayout";
+import { FLOOR2_X, STAIRS, floorBounds, type Floor } from "@/shared/floors";
 import { WeatherLayer } from "./weather";
 import { Cat } from "./cat";
 import { reactionFor } from "./gifts";
@@ -34,6 +38,7 @@ export type CafeCallbacks = {
   onOpenGuestbook: () => void;
   onOpenGame: () => void;
   onOpenOutfits: () => void;
+  onOpenArcade: (game: ArcadeGame) => void;
   onSfx: (name: SfxName) => void;
   onBeans: (amount: number, drinkMade: boolean) => void;
 };
@@ -48,6 +53,8 @@ const JUKEBOX_RANGE = 40;
 const GUESTBOOK_RANGE = 54;
 const OUTFIT_RANGE = 46;
 const CAT_RANGE = 40;
+const MACHINE_RANGE = 40;
+const STAIRS_RANGE = 46;
 const CUP_MS = 60_000;
 
 const PLANTS: [number, number][] = [
@@ -64,7 +71,10 @@ type Target =
   | { kind: "jukebox" }
   | { kind: "guestbook" }
   | { kind: "outfits" }
-  | { kind: "cat" };
+  | { kind: "cat" }
+  | { kind: "elevator" }
+  | { kind: "machine"; machine: Machine }
+  | { kind: "watch" };
 
 export class CafeScene extends Phaser.Scene {
   private hitbox!: Phaser.Physics.Arcade.Image;
@@ -111,6 +121,8 @@ export class CafeScene extends Phaser.Scene {
   private offNet: (() => void)[] = [];
   private lastSent = { x: -1, y: -1, flip: false, moving: false, t: 0 };
   private sitPending = false;
+  private floor: Floor = 1;
+  private floorBusy = false;
   private shuttingDown = false;
   // Key presses are captured from keydown *events* (not polled), so a very quick tap that
   // goes down and up inside one frame is never lost.
@@ -124,10 +136,11 @@ export class CafeScene extends Phaser.Scene {
     buildTextures(this);
     buildSpriteTextures(this);
     buildPropTextures(this);
+    buildArcadeTextures(this);
     this.world = this.registry.get("world") as WorldStore;
     this.net = (this.registry.get("net") as NetClient | null | undefined) ?? null;
     if (this.net) this.selfOcc = this.net.occupant;
-    this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
+    this.physics.world.setBounds(0, 0, FLOOR2_X + WORLD_W, WORLD_H); // both floors live side by side
     this.add.image(0, 0, "bg").setOrigin(0).setDepth(0);
     this.add.image(BOARD.x, BOARD.y, "board").setOrigin(0).setDepth(2);
 
@@ -161,7 +174,7 @@ export class CafeScene extends Phaser.Scene {
 
     const cam = this.cameras.main;
     cam.setZoom(2);
-    cam.setBounds(0, 0, WORLD_W, WORLD_H);
+    cam.setBounds(0, 0, WORLD_W, WORLD_H); // Floor 1; changeFloor() moves this to Floor 2
     cam.startFollow(this.hitbox, true, 0.12, 0.12);
     cam.roundPixels = true;
 
@@ -230,8 +243,8 @@ export class CafeScene extends Phaser.Scene {
 
   // ---------------------------------------------------------------- world
 
-  private solid(x: number, y: number, w: number, h: number) {
-    this.solidRects.push({ x, y, w, h });
+  private solid(x: number, y: number, w: number, h: number, nav = true) {
+    if (nav) this.solidRects.push({ x, y, w, h }); // Floor 2 furniture isn't on the NPCs' map
     const z = this.add.zone(x + w / 2, y + h / 2, w, h);
     this.physics.add.existing(z, true);
     this.physics.add.collider(this.hitbox, z);
@@ -332,6 +345,13 @@ export class CafeScene extends Phaser.Scene {
       p.setDepth(y);
       this.solid(x - 8, y - 12, 16, 12);
     }
+
+    // the elevator on Floor 1 and the whole Arcade on Floor 2
+    buildArcadeFloor({
+      scene: this,
+      place: (key, x, y, flip) => this.place(key, x, y, flip),
+      solid: (x, y, w, h, nav = false) => this.solid(x, y, w, h, nav),
+    });
   }
 
   private lamp(cx: number, tableY: number) {
@@ -486,6 +506,11 @@ export class CafeScene extends Phaser.Scene {
     this.talkTo(this.barista);
   }
 
+  /** The table window's "Leave table" button. */
+  standUpFromHud() {
+    if (this.seated) this.standUp();
+  }
+
   // ---------------------------------------------------------- interaction
 
   private findTarget(): Target | null {
@@ -518,6 +543,18 @@ export class CafeScene extends Phaser.Scene {
     if (od <= OUTFIT_RANGE) offer(od + 4, { kind: "outfits" });
     const cd = Math.hypot(px - this.cat.x, py - this.cat.y);
     if (cd <= CAT_RANGE) offer(cd - 6, { kind: "cat" }); // the cat is small and cute: it wins ties
+    const sp = STAIRS[this.floor].spot;
+    const sd = Math.hypot(px - sp.x, py - sp.y);
+    if (sd <= STAIRS_RANGE) offer(sd, { kind: "elevator" });
+    if (this.floor === 2) {
+      for (const m of MACHINES) {
+        if (!m.game) continue;
+        const md = Math.hypot(px - m.spot.x, py - m.spot.y);
+        if (md <= MACHINE_RANGE) offer(md, { kind: "machine", machine: m });
+      }
+      const wd = Math.hypot(px - ROULETTE_WATCH.x, py - ROULETTE_WATCH.y);
+      if (wd <= 40) offer(wd, { kind: "watch" });
+    }
     return best ? (best as { score: number; t: Target }).t : null;
   }
 
@@ -525,17 +562,26 @@ export class CafeScene extends Phaser.Scene {
     return !!this.seated && this.seated.id.startsWith(GAME_SEAT_PREFIX);
   }
 
+  private arcadeSeat() {
+    return arcadeSeatInfo(this.seated?.id);
+  }
+
   private promptFor(t: Target | null): string {
     if (this.seated) {
+      const arc = this.arcadeSeat();
+      if (arc) return `Press E to open the ${arc.table === "bj0" ? "Blackjack" : "Roulette"} table\nMove to stand up`;
       if (this.atGameTable()) return "Press E to play Tic-Tac-Toe\nMove to stand up";
       if (privateTableOf(this.seated.id)) return "Private Table: chat stays at this table\nPress E to stand";
       return "Press E to stand";
     }
     if (!t) return "";
     switch (t.kind) {
-      case "seat":
+      case "seat": {
+        const arc = arcadeSeatInfo(t.seat.id);
+        if (arc) return arc.table === "bj0" ? "Press E to sit and play Blackjack" : "Press E to sit at the Roulette table";
         if (t.seat.id.startsWith(GAME_SEAT_PREFIX)) return "Press E to sit and play Tic-Tac-Toe";
         return privateTableOf(t.seat.id) ? "Press E to join the Private Table (up to 6)" : "Press E to sit";
+      }
       case "npc": {
         const talk = `Press E to talk to ${t.npc.spec.name}`;
         return this.playerCup.visible && this.playerCup.kind ? `${talk}\nPress G to gift your ${drinkName(this.playerCup.kind)}` : talk;
@@ -546,6 +592,11 @@ export class CafeScene extends Phaser.Scene {
       case "guestbook": return "Press E to open the guestbook";
       case "outfits": return "Press E to view the Outfit Board";
       case "cat": return "Press E to pet Biscuit";
+      case "elevator":
+        if (!this.net) return "The Arcade needs the cafe server\n(npm run dev:all)";
+        return this.floor === 1 ? "Press E to go to Floor 2: Arcade" : "Press E to return to Floor 1: Main Cafe";
+      case "machine": return `Press E to ${t.machine.label}`;
+      case "watch": return "Press E to watch & bet at the Roulette table";
     }
   }
 
@@ -560,7 +611,45 @@ export class CafeScene extends Phaser.Scene {
       case "guestbook": this.sfx("page"); cb?.onOpenGuestbook(); break;
       case "outfits": this.sfx("page"); cb?.onOpenOutfits(); break;
       case "cat": this.petCat(); break;
+      case "elevator": void this.useElevator(); break;
+      case "machine": this.sfx("interact"); if (t.machine.game) cb?.onOpenArcade(t.machine.game); break;
+      case "watch": this.sfx("interact"); cb?.onOpenArcade("roulette"); break;
     }
+  }
+
+  // ------------------------------------------------------------- floors
+
+  private async useElevator() {
+    if (!this.net) {
+      this.bubbles.say("player", this.playerHead, "The Arcade needs the cafe server.", 2600);
+      return;
+    }
+    if (this.floorBusy) return;
+    this.floorBusy = true;
+    this.sfx("interact");
+    const r = await this.net.goFloor(this.floor === 1 ? 2 : 1); // the answer also arrives as a `floor:state` event
+    this.floorBusy = false;
+    if (!r.ok && !this.shuttingDown) this.bubbles.say("player", this.playerHead, r.reason, 2600);
+  }
+
+  /** Move everything that depends on the floor: who is visible, seats, camera, where we stand. */
+  private changeFloor(floor: Floor, x: number, y: number, players: PlayerState[], seats: FloorState["seats"] | null) {
+    this.floor = floor;
+    for (const r of this.remotes.values()) { this.bubbles.clear(r.id); r.destroy(); }
+    this.remotes.clear();
+    if (seats) mergeRemoteSeats(this.seats, seats, this.selfOcc, (id) => this.evictNpc(id));
+    for (const p of players) this.addRemote(p);
+    this.refreshRemoteSeats();
+    const body = this.hitbox.body as Phaser.Physics.Arcade.Body;
+    body.enable = true;
+    body.reset(x, y);
+    const b = floorBounds(floor);
+    const cam = this.cameras.main;
+    cam.setBounds(b.x, b.y, b.w, b.h);
+    cam.centerOn(x, y);
+    cam.fadeIn(350, 12, 8, 24);
+    this.lastSent = { x: -1, y: -1, flip: false, moving: false, t: 0 };
+    this.sfx("elevator");
   }
 
   private petCat() {
@@ -641,6 +730,8 @@ export class CafeScene extends Phaser.Scene {
     this.hitbox.setVelocity(0, 0);
     this.hitbox.setPosition(seat.x, seat.y - 4);
     this.sfx("sit");
+    const arc = arcadeSeatInfo(seat.id);
+    if (arc) this.time.delayedCall(450, () => { if (this.seated?.id === seat.id) this.cb()?.onOpenArcade(arc.table === "bj0" ? "blackjack" : "roulette"); });
     if (seat.id.startsWith(GAME_SEAT_PREFIX)) {
       if (!this.net) this.world.dispatch({ type: "ttt", action: { type: "join", side: "X", by: this.selfOcc } }); // online: the server seats us
       this.time.delayedCall(450, () => { if (this.atGameTable()) this.cb()?.onOpenGame(); }); // the board comes to you
@@ -697,7 +788,9 @@ export class CafeScene extends Phaser.Scene {
       if (this.seated) {
         if (moveTapped) this.standUp();
         else if (interact) {
-          if (this.atGameTable()) this.cb()?.onOpenGame(); // E re-opens the board; walking away stands you up
+          const arc = this.arcadeSeat();
+          if (arc) this.cb()?.onOpenArcade(arc.table === "bj0" ? "blackjack" : "roulette"); // E re-opens the table
+          else if (this.atGameTable()) this.cb()?.onOpenGame(); // E re-opens the board; walking away stands you up
           else this.standUp();
         }
       } else {
@@ -848,6 +941,10 @@ export class CafeScene extends Phaser.Scene {
         }
       }),
       net.on("world", (state) => this.world.load(state)),
+      net.on("floor:state", (fs) => {
+        if (this.seated) { this.seats.stand(this.selfOcc); this.seated = null; this.avatar.setCrop(); }
+        this.changeFloor(fs.floor, fs.x, fs.y, fs.players, fs.seats);
+      }),
       net.on("locks", (ids) => this.showLocks(ids)),
       net.on("crowns", (ids) => this.showCrowns(ids)),
       net.onClose(() => this.goSolo()),
@@ -901,6 +998,7 @@ export class CafeScene extends Phaser.Scene {
     if (!this.net || this.shuttingDown) return;
     this.net = null;
     this.selfCrowned = false;
+    if (this.floor === 2) this.changeFloor(1, STAIRS[1].arrive.x, STAIRS[1].arrive.y, [], null); // the Arcade needs the server
     this.showLocks([]);
     this.offNet.forEach((f) => f());
     this.offNet = [];

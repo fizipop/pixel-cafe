@@ -1,6 +1,6 @@
 # Pixel Cafe
 
-An anonymous, multiplayer, pixel-art social experience. **Phase 1: landing page + pixel character editor. Phase 2: walkable cafe + lofi music. Phase 3: NPCs, sitting, Rumour Board, emotes. Phase 3.5: jukebox + weather, drink mini-game, table game, guestbook, cafe cat, sound effects. Phase 4: real-time multiplayer (Socket.IO), proximity chat, shared room state. Phase 5: private tables, outfit leaderboard, server persistence.**
+An anonymous, multiplayer, pixel-art social experience. **Phase 1: landing page + pixel character editor. Phase 2: walkable cafe + lofi music. Phase 3: NPCs, sitting, Rumour Board, emotes. Phase 3.5: jukebox + weather, drink mini-game, table game, guestbook, cafe cat, sound effects. Phase 4: real-time multiplayer (Socket.IO), proximity chat, shared room state. Phase 5: private tables, outfit leaderboard, server persistence. Phase 6: Floor 2, the Arcade (elevator, blackjack, roulette, slots, mines, To the Moon, Cat Ice Jump, leaderboards).**
 
 ## Run it
 
@@ -29,6 +29,20 @@ If the server isn't running, `/play` still works in **solo mode** (like Phase 3.
 
 **Phase 5.** Sit at the long table in the lounge (6 seats) for chat only your table sees; use the HUD toggle to lock/open it. The Outfit Board (HUD button or the mannequin by the door) lets you give 1 upvote a day to someone else; today's #1 outfit(s) get a crown by their name tag. Rumours, guestbook notes and votes are saved to `server/data.json` (gitignored; override with `DATA_FILE`). Storage sits behind the `Repository` interface in `server/repository.ts`, so a Supabase version only needs a new class.
 
+**Phase 6: Floor 2 · Arcade.** Walk to the elevator on the left wall of the Main Cafe and press **E** (a matching elevator on Floor 2 brings you back). It needs the server: solo mode just tells you so. Each floor is its own room: you only see, hear and sit with people on your floor, while your name, sprite, drink badge and Cafe Beans come with you. The HUD shows `Floor 1 · Main Cafe` / `Floor 2 · Arcade`, and upstairs the cafe lofi is replaced by a procedural chiptune loop (same music toggle and volume slider; new sound effects for spins, card flips, cashouts and cat jumps).
+
+| Where (Floor 2) | What | How |
+|---|---|---|
+| Blackjack table | Hit / Stand / Double Down against the dealer, up to 4 seated players share one deal (blackjack pays 3:2) | stand at a stool, **E** to sit |
+| Roulette table | One live wheel, red/black, odd/even, 1-18 / 19-36 or a straight-up number (x36) | **E** at a stool, or **E** at the spot beside the table to watch and bet |
+| Slots cabinets | 3 reels: coffee cup, croissant, golden bean, pixel cat, 7 (payout table in the window) | **E** at the cabinet |
+| Cafe Mines | 5x5 board, you pick 1-24 hazards, reveal safe tiles, cash out any time | **E** at the cabinet |
+| To the Moon | Shared rocket with a rising multiplier, optional auto cash-out | **E** at the cabinet |
+| Cat Ice Jump | Playable cabinet: `<-` `->` / A D steer, Space / W / Up jump, or tap (left/right third steers) | **E** at the cabinet |
+| Leaderboard kiosk | Top Ice Jump runs, biggest Moon multipliers, richest Cafe Bean balances | **E** at the kiosk |
+
+**Cafe Beans are a fictional play currency**: they can't be bought, cashed out or traded. You earn them making drinks and gifting them, and spend them on Floor 2 (bets 5 to 500). If you drop below the smallest bet you get a free **daily starter top-up** (+50, once a day), and Cat Ice Jump is free to play and pays beans, so nobody gets stuck. Balances live on the server (`server/wallet.ts`), and every game result is decided server-side (`server/arcade.ts`, `crash.ts`, `roulette.ts`, `blackjack.ts`, `solo.ts`). Wallets and the three leaderboards persist in `server/data.json` through the same `Repository` interface.
+
 Environment variables (all optional): `PORT` (server port, default 3001), `CLIENT_ORIGIN` (comma-separated allowed website origins; default allows any), `NEXT_PUBLIC_SOCKET_URL` (where the browser finds the server; default `http://<this host>:3001`, so opening the site through your LAN IP also works).
 
 ## Where things live
@@ -47,6 +61,9 @@ Environment variables (all optional): `PORT` (server port, default 3001), `CLIEN
 | `src/game/art.ts` | All art drawn in code (swap for sprite sheets later) |
 | `src/game/createGame.ts` | Phaser config + handle (`setCharacter`, `destroy`) |
 | `src/lib/lofi.ts` | Procedural lofi jazz + cafe ambience (Web Audio, no audio files) |
+| `src/shared/floors.ts` / `src/game/arcadeLayout.ts` | Floors, elevators and the Floor 2 floor plan (both floors share one coordinate space, Floor 2 is shifted right) |
+| `src/shared/arcade.ts` | Pure game rules and maths (payouts, multipliers, blackjack, roulette), unit tested |
+| `src/components/arcade/` | The Floor 2 game windows |
 | `src/game/layout.ts` | Tables, sofas, counter, board positions and the 28 seats |
 | `src/game/seats.ts` | `SeatState`: who sits where (`snapshot()`/`load()`/`onChange`, ready for Phase 4 sync) |
 | `src/game/pathing.ts` | Grid A* so the wandering NPC never walks through furniture |

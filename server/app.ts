@@ -2,7 +2,7 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { Server, type Socket } from "socket.io";
 import type { ClientToServer, ServerToClient } from "../src/shared/protocol.ts";
-import { MOVE_HZ } from "../src/shared/protocol.ts";
+import { ARCADE_EVENTS, MOVE_HZ } from "../src/shared/protocol.ts";
 import { Room, type Conn, type RoomOptions } from "./room.ts";
 
 export type CafeServer = { room: Room; http: HttpServer; io: Server<ClientToServer, ServerToClient>; close: () => Promise<void> };
@@ -55,6 +55,16 @@ export function createCafeServer(opts: { origins?: string[]; room?: RoomOptions 
     socket.on("table:lock", safe((d, ack) => reply(ack, room.tableLock(id, d))));
     socket.on("outfit:list", safe((ack) => reply(ack, room.outfitList(id))));
     socket.on("outfit:vote", safe((d, ack) => reply(ack, room.outfitVote(id, d))));
+    socket.on("floor:go", safe((d, ack) => reply(ack, room.goFloor(id, d))));
+    socket.on("beans:earn", safe((d) => room.earn(id, d)));
+    // every Floor 2 mini-game request goes to the arcade, which answers through the ack
+    for (const ev of ARCADE_EVENTS) {
+      (socket as Socket).on(ev, safe((...args: unknown[]) => {
+        const ack = args.at(-1);
+        const payload = typeof args[0] === "function" ? undefined : args[0];
+        reply(ack, room.arcadeEvent(id, ev, payload));
+      }));
+    }
     socket.on("disconnect", safe(() => room.leave(id)));
   });
 

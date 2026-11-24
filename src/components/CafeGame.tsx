@@ -7,6 +7,10 @@ import {
   getActiveId, getUsername, loadCharacters, setActiveId, type SavedCharacter,
 } from "@/lib/characters";
 import { LofiPlayer } from "@/lib/lofi";
+import { ArcadeMusic } from "@/lib/arcadeMusic";
+import { FLOOR_NAMES, type Floor } from "@/shared/floors";
+import type { ArcadeGame } from "@/game/arcadeLayout";
+import ArcadeHost from "./arcade/ArcadeHost";
 import { Sfx, type SfxName } from "@/lib/sfx";
 import { moodName } from "@/lib/moods";
 import { addBeans, loadProfile } from "@/lib/profile";
@@ -71,15 +75,36 @@ export default function CafeGame() {
   const [net, setNet] = useState<NetClient | null>(null); // null = solo (server offline)
   const [connecting, setConnecting] = useState(false);
   const [chatting, setChatting] = useState(false);
+  const [arcade, setArcade] = useState<ArcadeGame | null>(null); // the Floor 2 game window that is open
+  const [toast, setToast] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<CafeHandle | null>(null);
   const netRef = useRef<NetClient | null>(null);
   const musicRef = useRef<LofiPlayer | null>(null);
   const sfxRef = useRef<Sfx | null>(null);
+  const arcadeMusicRef = useRef<ArcadeMusic | null>(null);
   const initialRef = useRef<{ username: string; pixels: string[] } | null>(null);
   const closeModal = useCallback(() => setModal(null), []);
   const playSfx = useCallback((n: SfxName) => sfxRef.current?.play(n), []);
+
+  // Which floor you are on, your server-side Cafe Beans and the daily top-up notice all come from the NetClient.
+  const floor: Floor = useSyncExternalStore(net ? net.subscribe : noopSubscribe, () => (net && !net.closed ? net.floor : 1), () => 1);
+  const netBeans = useSyncExternalStore(net ? net.subscribe : noopSubscribe, () => (net && !net.closed ? net.shownBeans : -1), () => -1);
+  const topup = useSyncExternalStore(net ? net.subscribe : noopSubscribe, () => (net && !net.closed ? net.topupNote : null), () => null);
+  const anyModal = modal !== null || arcade !== null;
+
+  useEffect(() => {
+    if (!topup) return;
+    queueMicrotask(() => setToast(`Daily starter top-up: +${topup.amount} Cafe Beans. Never stuck!`));
+    const t = setTimeout(() => setToast(null), 7000);
+    return () => clearTimeout(t);
+  }, [topup]);
+
+  // Floor 2 windows only make sense on Floor 2 (and while connected)
+  useEffect(() => {
+    if (floor !== 2 && arcade !== null) queueMicrotask(() => setArcade(null));
+  }, [floor, arcade]);
 
   // Load saved data (browser only).
   useEffect(() => {
@@ -111,7 +136,7 @@ export default function CafeGame() {
       if (cancelled || !initialRef.current) return;
       // Join the shared cafe first. If the server isn't running we carry on solo.
       setConnecting(true);
-      const connection = await NetClient.connect({ name: initialRef.current.username, pixels: initialRef.current.pixels });
+      const connection = await NetClient.connect({ name: initialRef.current.username, pixels: initialRef.current.pixels, beans: loadProfile().beans });
       if (cancelled || !containerRef.current) { connection?.close(); return; }
       netRef.current = connection;
       setNet(connection);
@@ -127,8 +152,9 @@ export default function CafeGame() {
           onOpenGuestbook: () => setModal("guestbook"),
           onOpenGame: () => setModal("game"),
           onOpenOutfits: () => setModal("outfits"),
+          onOpenArcade: (game) => setArcade(game),
           onSfx: (n) => sfxRef.current?.play(n),
-          onBeans: (n, made) => setBeans(addBeans(n, made).beans),
+          onBeans: (n, made) => { setBeans(addBeans(n, made).beans); netRef.current?.earn(n); },
         },
       });
       handleRef.current = handle;
@@ -145,8 +171,8 @@ export default function CafeGame() {
 
   // Pause the game keyboard while a modal is open so typing never walks the character.
   useEffect(() => {
-    handleRef.current?.setInputEnabled(modal === null && !chatting);
-  }, [modal, chatting, net]);
+    handleRef.current?.setInputEnabled(!anyModal && !chatting);
+  }, [anyModal, chatting, net]);
 
   // Keep music + sound effects in sync with the controls, and remember them.
   useEffect(() => {
@@ -155,6 +181,8 @@ export default function CafeGame() {
     sfxRef.current?.setVolume(volume);
     sfxRef.current?.setMuted(muted);
     sfxRef.current?.setEnabled(sfxOn);
+    arcadeMusicRef.current?.setVolume(volume);
+    arcadeMusicRef.current?.setMuted(muted);
     if (!loaded) return;
     try { localStorage.setItem(AUDIO_KEY, JSON.stringify({ volume, muted, sfx: sfxOn })); } catch { /* ignore */ }
   }, [volume, muted, sfxOn, loaded]);
@@ -166,8 +194,14 @@ export default function CafeGame() {
     if (loaded && !world.isRemote) saveWorldPrefs(wstate); // online, the room's mood isn't "your" preference
   }, [wstate, wstate.mood, wstate.weather, entered, loaded, world]);
 
+  // Upstairs, the cafe lofi gives way to the Arcade's own chiptune loop (same volume + music toggle).
+  useEffect(() => {
+    musicRef.current?.setDucked(floor === 2);
+    arcadeMusicRef.current?.setActive(floor === 2);
+  }, [floor, entered]);
+
   // Stop the audio if the player leaves the page.
-  useEffect(() => () => { musicRef.current?.stop(); sfxRef.current?.stop(); }, []);
+  useEffect(() => () => { musicRef.current?.stop(); sfxRef.current?.stop(); arcadeMusicRef.current?.stop(); }, []);
 
   const selected = chars.find((c) => c.id === selectedId);
 
@@ -190,6 +224,10 @@ export default function CafeGame() {
     sfx.setMuted(muted);
     sfx.setEnabled(sfxOn);
     sfx.start();
+    const arc = (arcadeMusicRef.current ??= new ArcadeMusic());
+    arc.setVolume(volume);
+    arc.setMuted(muted);
+    arc.start();
     setActiveId(selected.id);
     setEntered(true);
   };
@@ -260,7 +298,8 @@ export default function CafeGame() {
 
       <div className="px-panel absolute left-3 top-3 z-10 flex flex-col gap-2 p-3 text-lg">
         <span className="text-amber">{username}</span>
-        <span className="text-latte" title="Earn beans by making drinks and gifting them">Beans: <b className="text-cream">{beans}</b></span>
+        <span className="text-mint" data-testid="floor-name" title="Take the elevator to change floors">{FLOOR_NAMES[floor]}</span>
+        <span className="text-latte" title="Fictional Cafe Beans: earn them making drinks, play with them on Floor 2">Beans: <b className="text-cream" data-testid="hud-beans">{netBeans >= 0 ? netBeans : beans}</b></span>
         <select
           className="px-input !w-auto !py-0.5 !text-lg"
           value={selectedId}
@@ -309,9 +348,12 @@ export default function CafeGame() {
 
       <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2 bg-espresso/80 px-4 py-1 text-latte">
         WASD move · E interact · G gift drink · 1-4 emotes
+        {floor === 2 && " · E at a machine to play, sit at a table to join"}
       </div>
 
-      <ChatPanel net={net} disabled={modal !== null} onTypingChange={setChatting} />
+      {toast && <div className="px-panel pointer-events-none absolute left-1/2 top-20 z-20 -translate-x-1/2 px-4 py-2 text-xl text-mint" role="status">{toast}</div>}
+
+      <ChatPanel net={net} disabled={anyModal} onTypingChange={setChatting} />
 
       {modal === "board" && <RumourBoard source={rumourSource} onClose={closeModal} />}
       {modal === "order" && (
@@ -325,6 +367,15 @@ export default function CafeGame() {
       {modal === "jukebox" && <JukeboxMenu world={world} onClose={closeModal} sfx={playSfx} />}
       {modal === "outfits" && <OutfitBoard net={net && !net.closed ? net : null} onClose={closeModal} sfx={playSfx} />}
       {modal === "guestbook" && <Guestbook username={username} source={bookSource} onClose={closeModal} sfx={playSfx} />}
+      {arcade && net && !net.closed && (
+        <ArcadeHost
+          game={arcade}
+          net={net}
+          onClose={() => setArcade(null)}
+          sfx={playSfx}
+          onStand={() => { handleRef.current?.standUp(); setArcade(null); }}
+        />
+      )}
       {modal === "game" && <TableGame world={world} me={net?.occupant ?? PLAYER_ID} nameOf={net ? (o) => net.nameOf(o) : undefined} onClose={closeModal} sfx={playSfx} />}
     </div>
   );

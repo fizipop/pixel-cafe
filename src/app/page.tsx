@@ -42,7 +42,7 @@ const CUP = [
 const FEATURES = [
   { title: "Draw yourself", text: "No presets. Paint your own pixel character in a real pixel editor, and keep as many outfits as you like." },
   { title: "Stay anonymous", text: "You get a random name like MistyMuffin472. No real name, no photo, no profile to curate." },
-  { title: "Hang out", text: "Walk around with other real people, chat with whoever is nearby, make a drink, change the music and weather together, play Tic-Tac-Toe, sign the guestbook, claim a private table with friends and vote for the best outfit of the day." },
+  { title: "Hang out", text: "Walk around with other real people, chat with whoever is nearby, make a drink, change the music and weather together, play Tic-Tac-Toe, sign the guestbook, claim a private table with friends, vote for the best outfit of the day, or ride the elevator up to the Arcade." },
 ];
 
 const ROADMAP = [
@@ -56,9 +56,18 @@ const ROADMAP = [
   { name: "Rumour Board & Guestbook (shared live, saved on the server, rumours fade after 48h)", status: "Open now" },
   { name: "Private Tables: up to 6 seats, private table chat, open or lock it", status: "Open now" },
   { name: "Outfit Leaderboard: daily upvotes & a crown for the top outfit", status: "Open now" },
-  { name: "Arcade", status: "Later" },
+  { name: "Floor 2 · Arcade: take the elevator up to a neon carpet room with its own chiptune music", status: "Open now" },
+  { name: "Blackjack table: Hit, Stand & Double Down against the house, alone or with other players", status: "Open now" },
+  { name: "Roulette table: one live wheel for everyone seated or watching, red/black, odd/even or a number", status: "Open now" },
+  { name: "Pixel Slots: 3 reels of coffee cups, croissants, golden beans, pixel cats and 7s", status: "Open now" },
+  { name: "Cafe Mines: a 5×5 board of spilled coffee, build the multiplier and cash out", status: "Open now" },
+  { name: "To the Moon: a shared rocket, cash out before it fizzles", status: "Open now" },
+  { name: "Cat Ice Jump: a playable arcade cabinet, plus Leaderboards for top runs, biggest multipliers and richest beans", status: "Open now" },
   { name: "Voice Lounge", status: "Someday" },
 ];
+
+const ARCADE_NOTE =
+  "Everything upstairs uses Cafe Beans: a fictional play currency you earn by making drinks. Beans can't be bought, cashed out or traded, and if you ever run dry you get a free daily starter top-up.";
 
 export default function Home() {
   return (
@@ -110,6 +119,7 @@ export default function Home() {
         {/* Roadmap */}
         <section className="mb-16">
           <h2 className="mb-4 text-center font-pixel text-sm text-amber">What&apos;s on the menu</h2>
+          <p className="mb-3 text-center text-latte">{ARCADE_NOTE}</p>
           <ul className="px-panel divide-y-4 divide-espresso">
             {ROADMAP.map((r) => (
               <li key={r.name} className="flex items-center justify-between px-5 py-3">

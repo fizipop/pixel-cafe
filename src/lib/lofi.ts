@@ -638,6 +638,7 @@ export class LofiPlayer {
   private step = 0;
   private volume = 0.5;
   private muted = false;
+  private ducked = false; // upstairs in the Arcade the cafe lofi gives way to the arcade loop
   private mood: Mood = "dusk";
   private rainOn = false;
   private rain: { setLevel: (v: number) => void; stop: () => void } | null = null;
@@ -683,7 +684,7 @@ export class LofiPlayer {
 
   private applyVolume() {
     if (!this.ctx || !this.graph) return;
-    const level = this.muted ? 0 : this.volume * this.volume * 0.9;
+    const level = this.muted || this.ducked ? 0 : this.volume * this.volume * 0.9;
     this.graph.master.gain.setTargetAtTime(level, this.ctx.currentTime, 0.05);
   }
 
@@ -723,6 +724,12 @@ export class LofiPlayer {
 
   setVolume(v: number) {
     this.volume = Math.min(1, Math.max(0, v));
+    this.applyVolume();
+  }
+
+  /** Silence the cafe music (without touching the player's mute setting), e.g. while on Floor 2. */
+  setDucked(d: boolean) {
+    this.ducked = d;
     this.applyVolume();
   }
 
