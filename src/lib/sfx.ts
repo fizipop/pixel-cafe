@@ -1,0 +1,253 @@
+// Tiny procedural sound effects (Web Audio only, no audio files).
+// Every effect is a small recipe: oscillators and filtered noise with a quick envelope.
+// `Sfx` follows the same volume/mute as the music, and has its own on/off switch.
+
+export type SfxName =
+  | "click" | "interact" | "sit" | "stand" | "pour" | "froth" | "ding" | "beans"
+  | "purr" | "meow" | "place" | "win" | "lose" | "page" | "gift" | "emote" | "jukebox";
+
+export const SFX_NAMES: SfxName[] = [
+  "click", "interact", "sit", "stand", "pour", "froth", "ding", "beans",
+  "purr", "meow", "place", "win", "lose", "page", "gift", "emote", "jukebox",
+];
+
+type Ctx = BaseAudioContext;
+type Recipe = (c: Ctx, out: AudioNode, t: number, noise: AudioBuffer) => void;
+
+type ToneOpts = { type?: OscillatorType; f0: number; f1?: number; dur: number; vel: number; attack?: number };
+
+function tone(c: Ctx, out: AudioNode, t: number, o: ToneOpts) {
+  const osc = c.createOscillator();
+  osc.type = o.type ?? "sine";
+  osc.frequency.setValueAtTime(o.f0, t);
+  if (o.f1) osc.frequency.exponentialRampToValueAtTime(o.f1, t + o.dur);
+  const g = c.createGain();
+  const a = o.attack ?? 0.004;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(o.vel, t + a);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+  osc.connect(g);
+  g.connect(out);
+  osc.start(t);
+  osc.stop(t + o.dur + 0.03);
+}
+
+type NoiseOpts = {
+  filter: BiquadFilterType; f0: number; f1?: number; q?: number;
+  dur: number; vel: number; attack?: number; offset?: number;
+};
+
+function burst(c: Ctx, out: AudioNode, noise: AudioBuffer, t: number, o: NoiseOpts) {
+  const src = c.createBufferSource();
+  src.buffer = noise;
+  src.loop = true;
+  const f = c.createBiquadFilter();
+  f.type = o.filter;
+  f.frequency.setValueAtTime(o.f0, t);
+  if (o.f1) f.frequency.exponentialRampToValueAtTime(o.f1, t + o.dur);
+  f.Q.value = o.q ?? 0.8;
+  const g = c.createGain();
+  const a = o.attack ?? 0.005;
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(o.vel, t + a);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + o.dur);
+  src.connect(f);
+  f.connect(g);
+  g.connect(out);
+  src.start(t, o.offset ?? 0);
+  src.stop(t + o.dur + 0.03);
+}
+
+const RECIPES: Record<SfxName, Recipe> = {
+  click: (c, out, t) => {
+    tone(c, out, t, { f0: 1100, f1: 700, dur: 0.05, vel: 0.22 });
+  },
+  interact: (c, out, t) => {
+    tone(c, out, t, { f0: 520, dur: 0.09, vel: 0.2 });
+    tone(c, out, t + 0.07, { f0: 780, dur: 0.12, vel: 0.2 });
+  },
+  sit: (c, out, t, n) => {
+    tone(c, out, t, { f0: 150, f1: 70, dur: 0.16, vel: 0.4 });
+    burst(c, out, n, t, { filter: "lowpass", f0: 500, dur: 0.12, vel: 0.2 });
+  },
+  stand: (c, out, t, n) => {
+    tone(c, out, t, { f0: 80, f1: 140, dur: 0.12, vel: 0.3 });
+    burst(c, out, n, t, { filter: "lowpass", f0: 600, f1: 300, dur: 0.1, vel: 0.14 });
+  },
+  pour: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "bandpass", f0: 900, f1: 2300, q: 2, dur: 0.9, vel: 0.35, attack: 0.08 });
+    [0.15, 0.4, 0.62, 0.8].forEach((d, i) => tone(c, out, t + d, { f0: 380 + i * 90, f1: 900 + i * 120, dur: 0.09, vel: 0.14 }));
+  },
+  froth: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "highpass", f0: 3000, f1: 5500, q: 0.7, dur: 0.7, vel: 0.25, attack: 0.25 });
+    burst(c, out, n, t + 0.05, { filter: "bandpass", f0: 1500, dur: 0.5, vel: 0.12, attack: 0.2 });
+  },
+  ding: (c, out, t) => {
+    tone(c, out, t, { f0: 1319, dur: 0.7, vel: 0.28, attack: 0.002 });
+    tone(c, out, t, { f0: 1976, dur: 0.45, vel: 0.12, attack: 0.002 });
+  },
+  beans: (c, out, t) => {
+    [988, 1319, 1568, 1976].forEach((f, i) => tone(c, out, t + i * 0.06, { f0: f, dur: 0.14, vel: 0.2 }));
+  },
+  purr: (c, out, t, n) => {
+    // low noise, chopped by a ~25 Hz wobble: that rumbly purr
+    const src = c.createBufferSource();
+    src.buffer = n;
+    src.loop = true;
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 240;
+    const am = c.createGain();
+    am.gain.value = 0.5;
+    const lfo = c.createOscillator();
+    lfo.frequency.value = 24;
+    const lfoGain = c.createGain();
+    lfoGain.gain.value = 0.5;
+    lfo.connect(lfoGain);
+    lfoGain.connect(am.gain);
+    const env = c.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(0.9, t + 0.25);
+    env.gain.setValueAtTime(0.9, t + 1.1);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
+    src.connect(lp);
+    lp.connect(am);
+    am.connect(env);
+    env.connect(out);
+    src.start(t, 0.2);
+    lfo.start(t);
+    src.stop(t + 1.75);
+    lfo.stop(t + 1.75);
+  },
+  meow: (c, out, t) => {
+    const o = c.createOscillator();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(520, t);
+    o.frequency.linearRampToValueAtTime(900, t + 0.12);
+    o.frequency.linearRampToValueAtTime(560, t + 0.4);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 1400;
+    bp.Q.value = 1.5;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.3, t + 0.06);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+    o.connect(bp);
+    bp.connect(g);
+    g.connect(out);
+    o.start(t);
+    o.stop(t + 0.45);
+  },
+  place: (c, out, t, n) => {
+    tone(c, out, t, { f0: 760, f1: 480, dur: 0.07, vel: 0.3 });
+    burst(c, out, n, t, { filter: "bandpass", f0: 1300, q: 1.2, dur: 0.05, vel: 0.16 });
+  },
+  win: (c, out, t) => {
+    [523, 659, 784, 1047].forEach((f, i) => {
+      tone(c, out, t + i * 0.1, { f0: f, dur: 0.3, vel: 0.2 });
+      tone(c, out, t + i * 0.1, { type: "triangle", f0: f * 2, dur: 0.2, vel: 0.06 });
+    });
+  },
+  lose: (c, out, t) => {
+    tone(c, out, t, { type: "triangle", f0: 392, dur: 0.28, vel: 0.2 });
+    tone(c, out, t + 0.2, { type: "triangle", f0: 294, dur: 0.45, vel: 0.2 });
+  },
+  page: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "bandpass", f0: 2200, f1: 4200, q: 0.9, dur: 0.16, vel: 0.2, attack: 0.04 });
+  },
+  gift: (c, out, t) => {
+    [659, 880, 1175].forEach((f, i) => tone(c, out, t + i * 0.08, { f0: f, dur: 0.2, vel: 0.2 }));
+    tone(c, out, t + 0.3, { f0: 1568, dur: 0.4, vel: 0.14 });
+  },
+  emote: (c, out, t) => {
+    tone(c, out, t, { f0: 600, f1: 1000, dur: 0.07, vel: 0.2 });
+  },
+  jukebox: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "highpass", f0: 2500, dur: 0.3, vel: 0.12, attack: 0.02 });
+    tone(c, out, t + 0.04, { type: "triangle", f0: 180, f1: 420, dur: 0.3, vel: 0.22 });
+  },
+};
+
+/** Schedule one effect on any audio context (used live and for offline tests). */
+export function playRecipe(c: Ctx, out: AudioNode, name: SfxName, t: number, noise: AudioBuffer) {
+  RECIPES[name](c, out, t, noise);
+}
+
+export function makeNoise(c: Ctx, seconds = 2): AudioBuffer {
+  const buf = c.createBuffer(1, Math.ceil(c.sampleRate * seconds), c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return buf;
+}
+
+/** Live player. start() must run inside a user gesture (browser autoplay rules). */
+export class Sfx {
+  private ctx: AudioContext | null = null;
+  private master: GainNode | null = null;
+  private noise: AudioBuffer | null = null;
+  private last = new Map<SfxName, number>();
+  private volume = 0.5;
+  private muted = false;
+  private enabled = true;
+
+  start() {
+    if (this.ctx) {
+      this.ctx.resume().catch(() => {});
+      return;
+    }
+    const AC =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    this.ctx = new AC();
+    this.master = this.ctx.createGain();
+    const comp = this.ctx.createDynamicsCompressor();
+    this.master.connect(comp);
+    comp.connect(this.ctx.destination);
+    this.noise = makeNoise(this.ctx);
+    this.applyVolume();
+  }
+
+  private applyVolume() {
+    if (!this.ctx || !this.master) return;
+    // same curve as the music so the one volume slider feels the same for both
+    const level = this.muted || !this.enabled ? 0 : this.volume * this.volume * 1.4;
+    this.master.gain.setTargetAtTime(level, this.ctx.currentTime, 0.03);
+  }
+
+  setVolume(v: number) {
+    this.volume = Math.min(1, Math.max(0, v));
+    this.applyVolume();
+  }
+
+  setMuted(m: boolean) {
+    this.muted = m;
+    this.applyVolume();
+  }
+
+  setEnabled(on: boolean) {
+    this.enabled = on;
+    this.applyVolume();
+  }
+
+  get isEnabled() {
+    return this.enabled;
+  }
+
+  play(name: SfxName) {
+    const { ctx, master, noise } = this;
+    if (!ctx || !master || !noise || !this.enabled || this.muted || this.volume <= 0) return;
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
+    const now = performance.now();
+    if (now - (this.last.get(name) ?? 0) < 45) return; // never machine-gun the same sound
+    this.last.set(name, now);
+    RECIPES[name](ctx, master, ctx.currentTime + 0.005, noise);
+  }
+
+  stop() {
+    this.ctx?.close().catch(() => {});
+    this.ctx = null;
+    this.master = null;
+    this.noise = null;
+  }
+}
