@@ -8,9 +8,13 @@ import {
 } from "@/lib/characters";
 import { LofiPlayer } from "@/lib/lofi";
 import { ArcadeMusic } from "@/lib/arcadeMusic";
+import { RooftopMusic } from "@/lib/rooftopMusic";
 import { FLOOR_NAMES, type Floor } from "@/shared/floors";
 import type { ArcadeGame } from "@/game/arcadeLayout";
+import type { RooftopGame } from "@/game/rooftopLayout";
 import ArcadeHost from "./arcade/ArcadeHost";
+import RooftopHost from "./rooftop/RooftopHost";
+import FloorPicker from "./FloorPicker";
 import { Sfx, type SfxName } from "@/lib/sfx";
 import { moodName } from "@/lib/moods";
 import { addBeans, loadProfile } from "@/lib/profile";
@@ -30,7 +34,7 @@ import { localGuestbook, localRumours, netGuestbook, netRumours } from "@/net/st
 
 const AUDIO_KEY = "pixelcafe.audio.v1";
 
-type Modal = null | "board" | "order" | "jukebox" | "guestbook" | "game" | "outfits";
+type Modal = null | "board" | "order" | "jukebox" | "guestbook" | "game" | "outfits" | "floors";
 
 function loadAudioPrefs(): { volume: number; muted: boolean; sfx: boolean } {
   try {
@@ -76,6 +80,7 @@ export default function CafeGame() {
   const [connecting, setConnecting] = useState(false);
   const [chatting, setChatting] = useState(false);
   const [arcade, setArcade] = useState<ArcadeGame | null>(null); // the Floor 2 game window that is open
+  const [rooftop, setRooftop] = useState<RooftopGame | null>(null); // the Floor 3 window that is open (roast, telescope, photo stand, wall)
   const [toast, setToast] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -84,6 +89,7 @@ export default function CafeGame() {
   const musicRef = useRef<LofiPlayer | null>(null);
   const sfxRef = useRef<Sfx | null>(null);
   const arcadeMusicRef = useRef<ArcadeMusic | null>(null);
+  const rooftopMusicRef = useRef<RooftopMusic | null>(null);
   const initialRef = useRef<{ username: string; pixels: string[] } | null>(null);
   const closeModal = useCallback(() => setModal(null), []);
   const playSfx = useCallback((n: SfxName) => sfxRef.current?.play(n), []);
@@ -92,7 +98,7 @@ export default function CafeGame() {
   const floor: Floor = useSyncExternalStore(net ? net.subscribe : noopSubscribe, () => (net && !net.closed ? net.floor : 1), () => 1);
   const netBeans = useSyncExternalStore(net ? net.subscribe : noopSubscribe, () => (net && !net.closed ? net.shownBeans : -1), () => -1);
   const topup = useSyncExternalStore(net ? net.subscribe : noopSubscribe, () => (net && !net.closed ? net.topupNote : null), () => null);
-  const anyModal = modal !== null || arcade !== null;
+  const anyModal = modal !== null || arcade !== null || rooftop !== null;
 
   useEffect(() => {
     if (!topup) return;
@@ -105,6 +111,11 @@ export default function CafeGame() {
   useEffect(() => {
     if (floor !== 2 && arcade !== null) queueMicrotask(() => setArcade(null));
   }, [floor, arcade]);
+
+  // Floor 3 windows only make sense on Floor 3 (and while connected); the elevator picker is only for Floor 1-3 travel
+  useEffect(() => {
+    if (floor !== 3 && rooftop !== null) queueMicrotask(() => setRooftop(null));
+  }, [floor, rooftop]);
 
   // Load saved data (browser only).
   useEffect(() => {
@@ -153,6 +164,8 @@ export default function CafeGame() {
           onOpenGame: () => setModal("game"),
           onOpenOutfits: () => setModal("outfits"),
           onOpenArcade: (game) => setArcade(game),
+          onOpenFloors: () => setModal("floors"),
+          onOpenRooftop: (game) => setRooftop(game),
           onSfx: (n) => sfxRef.current?.play(n),
           onBeans: (n, made) => { setBeans(addBeans(n, made).beans); netRef.current?.earn(n); },
         },
@@ -183,6 +196,8 @@ export default function CafeGame() {
     sfxRef.current?.setEnabled(sfxOn);
     arcadeMusicRef.current?.setVolume(volume);
     arcadeMusicRef.current?.setMuted(muted);
+    rooftopMusicRef.current?.setVolume(volume);
+    rooftopMusicRef.current?.setMuted(muted);
     if (!loaded) return;
     try { localStorage.setItem(AUDIO_KEY, JSON.stringify({ volume, muted, sfx: sfxOn })); } catch { /* ignore */ }
   }, [volume, muted, sfxOn, loaded]);
@@ -194,14 +209,16 @@ export default function CafeGame() {
     if (loaded && !world.isRemote) saveWorldPrefs(wstate); // online, the room's mood isn't "your" preference
   }, [wstate, wstate.mood, wstate.weather, entered, loaded, world]);
 
-  // Upstairs, the cafe lofi gives way to the Arcade's own chiptune loop (same volume + music toggle).
+  // Upstairs, the cafe lofi gives way to each floor's own music: the Arcade's chiptune loop on Floor 2,
+  // the Rooftop's piano, breeze and rain on Floor 3 (same volume + music toggle for all of them).
   useEffect(() => {
-    musicRef.current?.setDucked(floor === 2);
+    musicRef.current?.setDucked(floor !== 1);
     arcadeMusicRef.current?.setActive(floor === 2);
+    rooftopMusicRef.current?.setActive(floor === 3);
   }, [floor, entered]);
 
   // Stop the audio if the player leaves the page.
-  useEffect(() => () => { musicRef.current?.stop(); sfxRef.current?.stop(); arcadeMusicRef.current?.stop(); }, []);
+  useEffect(() => () => { musicRef.current?.stop(); sfxRef.current?.stop(); arcadeMusicRef.current?.stop(); rooftopMusicRef.current?.stop(); }, []);
 
   const selected = chars.find((c) => c.id === selectedId);
 
@@ -228,6 +245,10 @@ export default function CafeGame() {
     arc.setVolume(volume);
     arc.setMuted(muted);
     arc.start();
+    const roof = (rooftopMusicRef.current ??= new RooftopMusic());
+    roof.setVolume(volume);
+    roof.setMuted(muted);
+    roof.start();
     setActiveId(selected.id);
     setEntered(true);
   };
@@ -298,7 +319,7 @@ export default function CafeGame() {
 
       <div className="px-panel absolute left-3 top-3 z-10 flex flex-col gap-2 p-3 text-lg">
         <span className="text-amber">{username}</span>
-        <span className="text-mint" data-testid="floor-name" title="Take the elevator to change floors">{FLOOR_NAMES[floor]}</span>
+        <span className="text-mint" data-testid="floor-name" title="Use the elevator to change floors">{FLOOR_NAMES[floor]}</span>
         <span className="text-latte" title="Fictional Cafe Beans: earn them making drinks, play with them on Floor 2">Beans: <b className="text-cream" data-testid="hud-beans">{netBeans >= 0 ? netBeans : beans}</b></span>
         <select
           className="px-input !w-auto !py-0.5 !text-lg"
@@ -349,6 +370,7 @@ export default function CafeGame() {
       <div className="pointer-events-none absolute bottom-4 left-1/2 z-10 -translate-x-1/2 bg-espresso/80 px-4 py-1 text-latte">
         WASD move · E interact · G gift drink · 1-4 emotes
         {floor === 2 && " · E at a machine to play, sit at a table to join"}
+        {floor === 3 && " · sit at the campfire (E) to roast · E at the telescope, photo stand or wall"}
       </div>
 
       {toast && <div className="px-panel pointer-events-none absolute left-1/2 top-20 z-20 -translate-x-1/2 px-4 py-2 text-xl text-mint" role="status">{toast}</div>}
@@ -365,6 +387,13 @@ export default function CafeGame() {
         />
       )}
       {modal === "jukebox" && <JukeboxMenu world={world} onClose={closeModal} sfx={playSfx} />}
+      {modal === "floors" && (
+        <FloorPicker
+          current={floor}
+          onClose={closeModal}
+          onPick={(f) => { setModal(null); handleRef.current?.travel(f); }}
+        />
+      )}
       {modal === "outfits" && <OutfitBoard net={net && !net.closed ? net : null} onClose={closeModal} sfx={playSfx} />}
       {modal === "guestbook" && <Guestbook username={username} source={bookSource} onClose={closeModal} sfx={playSfx} />}
       {arcade && net && !net.closed && (
@@ -374,6 +403,15 @@ export default function CafeGame() {
           onClose={() => setArcade(null)}
           sfx={playSfx}
           onStand={() => { handleRef.current?.standUp(); setArcade(null); }}
+        />
+      )}
+      {rooftop && net && !net.closed && (
+        <RooftopHost
+          game={rooftop}
+          net={net}
+          onClose={() => setRooftop(null)}
+          sfx={playSfx}
+          onOpen={(g) => setRooftop(g)}
         />
       )}
       {modal === "game" && <TableGame world={world} me={net?.occupant ?? PLAYER_ID} nameOf={net ? (o) => net.nameOf(o) : undefined} onClose={closeModal} sfx={playSfx} />}

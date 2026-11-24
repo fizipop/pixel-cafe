@@ -19,8 +19,11 @@ import { NPC_SPECS, Npc, type NpcWorld } from "./npcs";
 import { buildPropTextures, JUKEBOX } from "./props";
 import { buildArcadeTextures } from "./arcadeArt";
 import { buildArcadeFloor } from "./arcadeFloor";
+import { buildRooftopTextures } from "./rooftopArt";
+import { buildRooftopFloor } from "./rooftopFloor";
+import { PHOTO_STAND, POLAROID_WALL, TELESCOPE, isFireSeat, type RooftopGame } from "./rooftopLayout";
 import { MACHINES, ROULETTE_WATCH, arcadeSeatInfo, type ArcadeGame, type Machine } from "./arcadeLayout";
-import { FLOOR2_X, STAIRS, floorBounds, type Floor } from "@/shared/floors";
+import { STAIRS, WORLD_TOTAL_W, floorBounds, type Floor } from "@/shared/floors";
 import { WeatherLayer } from "./weather";
 import { Cat } from "./cat";
 import { reactionFor } from "./gifts";
@@ -39,6 +42,10 @@ export type CafeCallbacks = {
   onOpenGame: () => void;
   onOpenOutfits: () => void;
   onOpenArcade: (game: ArcadeGame) => void;
+  /** The elevator's floor picker (pick a floor, then the page calls `travel`). */
+  onOpenFloors: () => void;
+  /** A Floor 3 window: roast a marshmallow, stargaze, take a Polaroid or look at the Polaroid Wall. */
+  onOpenRooftop: (game: RooftopGame) => void;
   onSfx: (name: SfxName) => void;
   onBeans: (amount: number, drinkMade: boolean) => void;
 };
@@ -55,6 +62,7 @@ const OUTFIT_RANGE = 46;
 const CAT_RANGE = 40;
 const MACHINE_RANGE = 40;
 const STAIRS_RANGE = 46;
+const ROOF_RANGE = 44; // telescope / photo stand / Polaroid Wall prompts
 const CUP_MS = 60_000;
 
 const PLANTS: [number, number][] = [
@@ -74,7 +82,10 @@ type Target =
   | { kind: "cat" }
   | { kind: "elevator" }
   | { kind: "machine"; machine: Machine }
-  | { kind: "watch" };
+  | { kind: "watch" }
+  | { kind: "stars" }
+  | { kind: "photo" }
+  | { kind: "wall" };
 
 export class CafeScene extends Phaser.Scene {
   private hitbox!: Phaser.Physics.Arcade.Image;
@@ -137,10 +148,11 @@ export class CafeScene extends Phaser.Scene {
     buildSpriteTextures(this);
     buildPropTextures(this);
     buildArcadeTextures(this);
+    buildRooftopTextures(this);
     this.world = this.registry.get("world") as WorldStore;
     this.net = (this.registry.get("net") as NetClient | null | undefined) ?? null;
     if (this.net) this.selfOcc = this.net.occupant;
-    this.physics.world.setBounds(0, 0, FLOOR2_X + WORLD_W, WORLD_H); // both floors live side by side
+    this.physics.world.setBounds(0, 0, WORLD_TOTAL_W, WORLD_H); // all three floors live side by side
     this.add.image(0, 0, "bg").setOrigin(0).setDepth(0);
     this.add.image(BOARD.x, BOARD.y, "board").setOrigin(0).setDepth(2);
 
@@ -174,7 +186,7 @@ export class CafeScene extends Phaser.Scene {
 
     const cam = this.cameras.main;
     cam.setZoom(2);
-    cam.setBounds(0, 0, WORLD_W, WORLD_H); // Floor 1; changeFloor() moves this to Floor 2
+    cam.setBounds(0, 0, WORLD_W, WORLD_H); // Floor 1; changeFloor() moves this to the floor you travel to
     cam.startFollow(this.hitbox, true, 0.12, 0.12);
     cam.roundPixels = true;
 
@@ -346,12 +358,14 @@ export class CafeScene extends Phaser.Scene {
       this.solid(x - 8, y - 12, 16, 12);
     }
 
-    // the elevator on Floor 1 and the whole Arcade on Floor 2
-    buildArcadeFloor({
+    // the elevator on Floor 1, the whole Arcade on Floor 2 and the Rooftop Lounge on Floor 3
+    const floorBuilder = {
       scene: this,
-      place: (key, x, y, flip) => this.place(key, x, y, flip),
-      solid: (x, y, w, h, nav = false) => this.solid(x, y, w, h, nav),
-    });
+      place: (key: string, x: number, y: number, flip?: boolean) => this.place(key, x, y, flip),
+      solid: (x: number, y: number, w: number, h: number, nav = false) => this.solid(x, y, w, h, nav),
+    };
+    buildArcadeFloor(floorBuilder);
+    buildRooftopFloor(floorBuilder);
   }
 
   private lamp(cx: number, tableY: number) {
@@ -555,6 +569,12 @@ export class CafeScene extends Phaser.Scene {
       const wd = Math.hypot(px - ROULETTE_WATCH.x, py - ROULETTE_WATCH.y);
       if (wd <= 40) offer(wd, { kind: "watch" });
     }
+    if (this.floor === 3) {
+      const near = (spot: { x: number; y: number }) => Math.hypot(px - spot.x, py - spot.y);
+      if (near(TELESCOPE.spot) <= ROOF_RANGE) offer(near(TELESCOPE.spot), { kind: "stars" });
+      if (near(PHOTO_STAND.spot) <= ROOF_RANGE) offer(near(PHOTO_STAND.spot), { kind: "photo" });
+      if (near(POLAROID_WALL.spot) <= ROOF_RANGE) offer(near(POLAROID_WALL.spot), { kind: "wall" });
+    }
     return best ? (best as { score: number; t: Target }).t : null;
   }
 
@@ -570,6 +590,7 @@ export class CafeScene extends Phaser.Scene {
     if (this.seated) {
       const arc = this.arcadeSeat();
       if (arc) return `Press E to open the ${arc.table === "bj0" ? "Blackjack" : "Roulette"} table\nMove to stand up`;
+      if (isFireSeat(this.seated.id)) return "Press E to roast a marshmallow\nMove to stand up";
       if (this.atGameTable()) return "Press E to play Tic-Tac-Toe\nMove to stand up";
       if (privateTableOf(this.seated.id)) return "Private Table: chat stays at this table\nPress E to stand";
       return "Press E to stand";
@@ -579,6 +600,7 @@ export class CafeScene extends Phaser.Scene {
       case "seat": {
         const arc = arcadeSeatInfo(t.seat.id);
         if (arc) return arc.table === "bj0" ? "Press E to sit and play Blackjack" : "Press E to sit at the Roulette table";
+        if (isFireSeat(t.seat.id)) return "Press E to sit by the campfire";
         if (t.seat.id.startsWith(GAME_SEAT_PREFIX)) return "Press E to sit and play Tic-Tac-Toe";
         return privateTableOf(t.seat.id) ? "Press E to join the Private Table (up to 6)" : "Press E to sit";
       }
@@ -593,10 +615,13 @@ export class CafeScene extends Phaser.Scene {
       case "outfits": return "Press E to view the Outfit Board";
       case "cat": return "Press E to pet Biscuit";
       case "elevator":
-        if (!this.net) return "The Arcade needs the cafe server\n(npm run dev:all)";
-        return this.floor === 1 ? "Press E to go to Floor 2: Arcade" : "Press E to return to Floor 1: Main Cafe";
+        if (!this.net) return "The elevator needs the cafe server\n(npm run dev:all)";
+        return "Press E to use the elevator\n(Floors 1 · 2 · 3)";
       case "machine": return `Press E to ${t.machine.label}`;
       case "watch": return "Press E to watch & bet at the Roulette table";
+      case "stars": return this.net ? "Press E to stargaze through the telescope" : "The stars need the cafe server\n(npm run dev:all)";
+      case "photo": return this.net ? "Press E to take a group Polaroid" : "The photo stand needs the cafe server\n(npm run dev:all)";
+      case "wall": return this.net ? "Press E to look at the Polaroid Wall" : "The wall needs the cafe server\n(npm run dev:all)";
     }
   }
 
@@ -611,23 +636,43 @@ export class CafeScene extends Phaser.Scene {
       case "guestbook": this.sfx("page"); cb?.onOpenGuestbook(); break;
       case "outfits": this.sfx("page"); cb?.onOpenOutfits(); break;
       case "cat": this.petCat(); break;
-      case "elevator": void this.useElevator(); break;
+      case "elevator": this.openElevator(); break;
       case "machine": this.sfx("interact"); if (t.machine.game) cb?.onOpenArcade(t.machine.game); break;
       case "watch": this.sfx("interact"); cb?.onOpenArcade("roulette"); break;
+      case "stars": this.roofWindow("stars"); break;
+      case "photo": this.roofWindow("photo"); break;
+      case "wall": this.roofWindow("wall"); break;
     }
   }
 
   // ------------------------------------------------------------- floors
 
-  private async useElevator() {
+  /** E at the elevator: the page opens its floor picker, which calls `travel` with the floor you chose. */
+  private openElevator() {
     if (!this.net) {
-      this.bubbles.say("player", this.playerHead, "The Arcade needs the cafe server.", 2600);
+      this.bubbles.say("player", this.playerHead, "The elevator needs the cafe server.", 2600);
       return;
     }
-    if (this.floorBusy) return;
-    this.floorBusy = true;
     this.sfx("interact");
-    const r = await this.net.goFloor(this.floor === 1 ? 2 : 1); // the answer also arrives as a `floor:state` event
+    this.cb()?.onOpenFloors();
+  }
+
+  /** Floor 3 windows (telescope, photo stand, Polaroid Wall) all need the server. */
+  private roofWindow(game: RooftopGame) {
+    if (!this.net) {
+      this.bubbles.say("player", this.playerHead, "That needs the cafe server.", 2600);
+      return;
+    }
+    this.sfx("interact");
+    this.cb()?.onOpenRooftop(game);
+  }
+
+  /** Ride the elevator to `to` (you must be standing at it; the server checks). The answer also arrives as a `floor:state` event. */
+  async travel(to: Floor) {
+    if (!this.net || this.floorBusy || this.shuttingDown) return;
+    if (to === this.floor) return;
+    this.floorBusy = true;
+    const r = await this.net.goFloor(to);
     this.floorBusy = false;
     if (!r.ok && !this.shuttingDown) this.bubbles.say("player", this.playerHead, r.reason, 2600);
   }
@@ -789,7 +834,8 @@ export class CafeScene extends Phaser.Scene {
         if (moveTapped) this.standUp();
         else if (interact) {
           const arc = this.arcadeSeat();
-          if (arc) this.cb()?.onOpenArcade(arc.table === "bj0" ? "blackjack" : "roulette"); // E re-opens the table
+          if (isFireSeat(this.seated.id)) this.roofWindow("roast"); // E at the campfire: roast a marshmallow
+          else if (arc) this.cb()?.onOpenArcade(arc.table === "bj0" ? "blackjack" : "roulette"); // E re-opens the table
           else if (this.atGameTable()) this.cb()?.onOpenGame(); // E re-opens the board; walking away stands you up
           else this.standUp();
         }
@@ -998,7 +1044,7 @@ export class CafeScene extends Phaser.Scene {
     if (!this.net || this.shuttingDown) return;
     this.net = null;
     this.selfCrowned = false;
-    if (this.floor === 2) this.changeFloor(1, STAIRS[1].arrive.x, STAIRS[1].arrive.y, [], null); // the Arcade needs the server
+    if (this.floor !== 1) this.changeFloor(1, STAIRS[1].arrive.x, STAIRS[1].arrive.y, [], null); // the Arcade and Rooftop need the server
     this.showLocks([]);
     this.offNet.forEach((f) => f());
     this.offNet = [];

@@ -5,6 +5,7 @@
 // "player:<socket id>" (NPCs are "npc:<name>"), the same ids the client uses.
 import { SeatState, type SeatSnapshot } from "../src/game/seats.ts";
 import { arcadeSeatInfo } from "../src/game/arcadeLayout.ts";
+import { isFireSeat } from "../src/game/rooftopLayout.ts";
 import { GAME_NPC, GAME_SEAT_PREFIX, NPC_SEATS, PRIVATE_CAPACITY, PRIVATE_TABLES, buildSeats, privateTableOf } from "../src/game/layout.ts";
 import { WorldStore, newWorld, type WorldAction } from "../src/game/worldState.ts";
 import { chooseMove, type Side } from "../src/game/tictactoe.ts";
@@ -16,9 +17,10 @@ import {
   CHAT_COOLDOWN_MS, CHAT_MAX, CHAT_RADIUS, NAME_MAX, SIT_REACH, playerOccupant,
   type ChatMessage, type InitPayload, type JoinPayload, type MoveUpdate, type OutfitView, type PlayerState, type Result, type TableInfo,
 } from "../src/shared/protocol.ts";
-import { STAIRS, STAIRS_REACH, clampToFloor, floorOfSeat, type Floor } from "../src/shared/floors.ts";
-import type { ArcadeEvent } from "../src/shared/protocol.ts";
+import { STAIRS, STAIRS_REACH, clampToFloor, floorOfSeat, isFloor, type Floor } from "../src/shared/floors.ts";
+import type { ArcadeEvent, RooftopEvent } from "../src/shared/protocol.ts";
 import { Arcade } from "./arcade.ts";
+import { Rooftop } from "./rooftop.ts";
 import { Guestbook, RumourBoard } from "./boards.ts";
 import { OutfitBoard } from "./outfits.ts";
 import { MemoryRepository, type Repository } from "./repository.ts";
@@ -72,6 +74,7 @@ export class Room {
   readonly outfits: OutfitBoard;
   readonly repo: Repository;
   readonly arcade: Arcade;
+  readonly rooftop: Rooftop;
   /** Locked private tables -> socket ids allowed to (re)take a seat (those seated when it was locked). */
   readonly locked = new Map<string, Set<string>>();
 
@@ -98,6 +101,16 @@ export class Room {
       socketsOf: (clientId) => [...this.players.values()].filter((q) => q.clientId === clientId).map((q) => q.conn.id),
       who: (id) => { const q = this.players.get(id); return q ? { sockId: id, clientId: q.clientId, name: q.state.name } : undefined; },
       floorOf: (id) => this.players.get(id)?.floor,
+    });
+    this.rooftop = new Rooftop(this.repo, {
+      now: () => this.now(),
+      rng: opts.rng ?? Math.random,
+      emitTo: (id, event, payload) => this.players.get(id)?.conn.emit(event, payload),
+      who: (id) => this.roofWho(id),
+      onRooftop: () => [...this.players.keys()].filter((id) => this.players.get(id)?.floor === 3).map((id) => this.roofWho(id)!),
+      announce: (text) => this.floorAll(3, "system", { text }),
+      wallets: this.arcade.wallets,
+      pushWallet: (clientId) => this.arcade.pushWallet(clientId),
     });
     for (const [seatId, who] of Object.entries(NPC_SEATS)) this.seats.sit(who, seatId); // NPCs' chairs are taken
     this.world = new WorldStore(newWorld());
@@ -130,6 +143,11 @@ export class Room {
 
   private get(id: string) {
     return this.players.get(id);
+  }
+
+  private roofWho(id: string) {
+    const q = this.players.get(id);
+    return q ? { sockId: id, clientId: q.clientId, name: q.state.name, pixels: q.state.pixels, x: q.state.x, y: q.state.y, floor: q.floor, seat: q.seat } : undefined;
   }
 
   private system(text: string) {
@@ -187,6 +205,7 @@ export class Room {
     if (!p) return;
     const hadSeat = this.releaseSeat(id);
     this.arcade.leftFloor(id);
+    this.rooftop.leftFloor(id);
     this.players.delete(id);
     this.floorAll(p.floor, "player:left", { id });
     if (hadSeat) this.pushSeats(p.floor);
@@ -283,6 +302,7 @@ export class Room {
     if (!this.seats.sit(who, seat.id)) return { ok: false, reason: "Someone just took that seat." };
     if (before && before !== seat.id && this.isGameSeat(before) && !this.isGameSeat(seat.id)) this.leaveTable(who);
     if (before && before !== seat.id && arcadeSeatInfo(before)) this.arcade.stoodUp(id, before);
+    if (before && before !== seat.id && isFireSeat(before)) this.rooftop.stoodUp(id);
     p.seat = seat.id;
     p.state.x = seat.x;
     p.state.y = seat.y;
@@ -356,6 +376,7 @@ export class Room {
     if (seatId === undefined) return false;
     if (this.isGameSeat(seatId)) this.leaveTable(who);
     else if (arcadeSeatInfo(seatId)) this.arcade.stoodUp(id, seatId);
+    else if (isFireSeat(seatId)) this.rooftop.stoodUp(id);
     return true;
   }
 
@@ -448,12 +469,12 @@ export class Room {
 
   // ------------------------------------------------------------- floors
 
-  /** Take the stairs/elevator (you must be standing at it, not seated). Everything on the other floor is scoped away. */
+  /** Take the elevator to any floor (you must be standing at it, not seated). Everything on the other floors is scoped away. */
   goFloor(id: string, d: { floor: unknown }): Result {
     const p = this.get(id);
     if (!p) return { ok: false, reason: "Not in the cafe." };
     const to = d?.floor;
-    if (to !== 1 && to !== 2) return { ok: false, reason: "No such floor." };
+    if (!isFloor(to)) return { ok: false, reason: "No such floor." };
     if (to === p.floor) return { ok: false, reason: "You are already on that floor." };
     if (p.seat) return { ok: false, reason: "Stand up first." };
     const from = STAIRS[p.floor];
@@ -461,6 +482,7 @@ export class Room {
 
     this.floorAll(p.floor, "player:left", { id }, id);
     this.arcade.leftFloor(id);
+    this.rooftop.leftFloor(id);
     p.floor = to;
     p.state.floor = to;
     p.state.x = STAIRS[to].arrive.x;
@@ -484,6 +506,11 @@ export class Room {
   /** Every Floor 2 mini-game request comes through here (see server/arcade.ts). */
   arcadeEvent(id: string, event: ArcadeEvent, d: unknown): unknown {
     return this.arcade.handle(id, event, d, this.get(id)?.seat ?? null);
+  }
+
+  /** Every Floor 3 request (roasting, star wishes, Polaroids) comes through here (see server/rooftop.ts). */
+  rooftopEvent(id: string, event: RooftopEvent, d: unknown): unknown {
+    return this.rooftop.handle(id, event, d);
   }
 
   // ------------------------------------------------- rumours & guestbook

@@ -7,7 +7,7 @@ import {
 } from "../shared/arcade.ts";
 import { mulberry32 } from "./iceJump.ts";
 import { arcadeStep, arcadeStepSeconds, ARCADE_BPM } from "../lib/arcadeMusic.ts";
-import { FLOOR2_X, FLOOR_NAMES, STAIRS, clampToFloor, floorOfSeat, floorOfX } from "../shared/floors.ts";
+import { FLOOR2_X, FLOOR3_X, FLOOR_NAMES, STAIRS, clampToFloor, floorOfSeat, floorOfX } from "../shared/floors.ts";
 import { MACHINES, arcadeSeatInfo, arcadeSeats, BLACKJACK, ROULETTE } from "./arcadeLayout.ts";
 import { WALL_H, WORLD_H, WORLD_W, TILE } from "./constants.ts";
 
@@ -130,8 +130,14 @@ test("blackjack: shoe, totals and payouts", () => {
 test("floors: names, coordinates and elevators", () => {
   assert.equal(FLOOR_NAMES[1], "Floor 1 · Main Cafe");
   assert.equal(FLOOR_NAMES[2], "Floor 2 · Arcade");
+  assert.equal(FLOOR_NAMES[3], "Floor 3 · Rooftop Lounge");
   assert.equal(floorOfX(500), 1);
   assert.equal(floorOfX(FLOOR2_X + 10), 2);
+  assert.equal(floorOfX(FLOOR3_X + 10), 3);
+  assert.deepEqual(clampToFloor(3, 0, -10), { x: FLOOR3_X, y: 0 });
+  assert.deepEqual(clampToFloor(3, 99999, 99999), { x: FLOOR3_X + WORLD_W, y: WORLD_H });
+  assert.equal(floorOfSeat("f3-fire-2"), 3);
+  assert.ok(STAIRS[3].spot.x - STAIRS[1].spot.x === FLOOR3_X);
   assert.deepEqual(clampToFloor(2, 0, -10), { x: FLOOR2_X, y: 0 });
   assert.deepEqual(clampToFloor(1, 99999, 99999), { x: WORLD_W, y: WORLD_H });
   assert.equal(floorOfSeat("t1-left"), 1);

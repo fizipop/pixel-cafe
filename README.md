@@ -1,6 +1,6 @@
 # Pixel Cafe
 
-An anonymous, multiplayer, pixel-art social experience. **Phase 1: landing page + pixel character editor. Phase 2: walkable cafe + lofi music. Phase 3: NPCs, sitting, Rumour Board, emotes. Phase 3.5: jukebox + weather, drink mini-game, table game, guestbook, cafe cat, sound effects. Phase 4: real-time multiplayer (Socket.IO), proximity chat, shared room state. Phase 5: private tables, outfit leaderboard, server persistence. Phase 6: Floor 2, the Arcade (elevator, blackjack, roulette, slots, mines, To the Moon, Cat Ice Jump, leaderboards).**
+An anonymous, multiplayer, pixel-art social experience. **Phase 1: landing page + pixel character editor. Phase 2: walkable cafe + lofi music. Phase 3: NPCs, sitting, Rumour Board, emotes. Phase 3.5: jukebox + weather, drink mini-game, table game, guestbook, cafe cat, sound effects. Phase 4: real-time multiplayer (Socket.IO), proximity chat, shared room state. Phase 5: private tables, outfit leaderboard, server persistence. Phase 6: Floor 2, the Arcade (elevator, blackjack, roulette, slots, mines, To the Moon, Cat Ice Jump, leaderboards). Phase 7: Floor 3, the Rooftop Lounge (floor picker, campfire marshmallows, stargazing wishes, Polaroid Wall).**
 
 ## Run it
 
@@ -186,3 +186,16 @@ Server to browser (`ServerToClient`):
 - No accounts, moderation or persistence: it's a prototype for friends, not the open internet. Add a database, report/mute tools and per-IP limits before going public.
 - One shared room (max 40 players).
 - Beans stay on your device.
+
+## Phase 7: Floor 3 · Rooftop Lounge
+
+Press **E** at any elevator to open the floor picker (click a floor, or press **1**, **2**, **3**; **Esc** closes). Floor 3 is its own room like the others: players, chat, movement and seats are scoped to it, and your sprite, name, drink and Cafe Beans travel with you. It has its own procedural soundtrack (electric piano, nylon-string plucks, music-box bells, breeze and light rain) that follows the music toggle and volume slider.
+
+| Where | What | How |
+| --- | --- | --- |
+| Campfire logs | Roast a marshmallow | Sit on a log (**E**), press **E** again, skewer, then pull it out (**Space**/**E**/button) when golden-brown. The server times it; a perfect roast pays +5 Cafe Beans (once per 12 s). |
+| Telescope | Stargazing | **E**. Hover or pick named constellations, watch shooting stars, post an anonymous wish (80 chars, one per 20 s) that other stargazers see live. |
+| Photo stand | Group Polaroid | **E**. 3-2-1, then a photo of everyone on the rooftop (up to 6) with sprites, names and time. |
+| Polaroid Wall | Shared gallery | **E**. The newest 24 photos, saved in `server/data.json`. |
+
+Code: `src/game/rooftop*.ts` (layout, art, scene), `src/shared/rooftop.ts` (rules), `server/rooftop.ts`, `src/components/rooftop/`, `src/lib/rooftopMusic.ts`.

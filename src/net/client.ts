@@ -10,7 +10,7 @@ import type { WorldAction, WorldState } from "@/game/worldState";
 import type { Floor } from "@/shared/floors";
 import {
   playerOccupant,
-  type Ack, type ArcadeEvent, type BlackjackView, type CrashView, type FloorState, type GuestbookView, type InitPayload, type OutfitView,
+  type Ack, type ArcadeEvent, type RooftopEvent, type BlackjackView, type CrashView, type FloorState, type GuestbookView, type InitPayload, type OutfitView,
   type Result, type RouletteView, type RumourView, type ServerToClient, type TableInfo, type WalletMsg,
 } from "@/shared/protocol";
 
@@ -205,14 +205,23 @@ export class NetClient {
   earn(amount: number) { if (!this.closed) this.socket.emit("beans:earn", { amount }); }
   /** A Floor 2 mini-game request. Resolves with the server's answer (never throws). */
   call<T = object>(event: ArcadeEvent, payload?: unknown): Promise<Ack<T>> {
+    return this.request<T>(event, payload, "The arcade didn't answer. Try again.");
+  }
+  /** A Floor 3 request (roasting, star wishes, Polaroids). Resolves with the server's answer (never throws). */
+  roof<T = object>(event: RooftopEvent, payload?: unknown): Promise<Ack<T>> {
+    return this.request<T>(event, payload, "The rooftop didn't answer. Try again.");
+  }
+  private request<T>(event: string, payload: unknown, timeoutMsg: string): Promise<Ack<T>> {
     return new Promise((resolve) => {
       if (this.closed) return resolve({ ok: false, reason: "Disconnected from the cafe." });
-      const done = (err: Error | null, res?: Ack<T>) => resolve(err || !res ? { ok: false, reason: "The arcade didn't answer. Try again." } : res);
+      const done = (err: Error | null, res?: Ack<T>) => resolve(err || !res ? { ok: false, reason: timeoutMsg } : res);
       const t = this.socket.timeout(4000);
       if (payload === undefined) t.emit(event, done);
       else t.emit(event, payload, done);
     });
   }
+  /** Tell the server you closed the telescope window (so you stop getting live wishes). */
+  leaveStars() { if (!this.closed) this.socket.emit("stars:leave"); }
   chat(text: string) { return this.ask("chat", { text }); }
   rumourPost(text: string) { return this.ask("rumour:post", { text }); }
   guestbookSign(text: string) { return this.ask("guestbook:sign", { text }); }

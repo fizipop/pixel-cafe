@@ -6,12 +6,15 @@ export type SfxName =
   | "click" | "interact" | "sit" | "stand" | "pour" | "froth" | "ding" | "beans"
   | "purr" | "meow" | "place" | "win" | "lose" | "page" | "gift" | "emote" | "jukebox"
   // Floor 2: arcade
-  | "elevator" | "spin" | "reelStop" | "cardFlip" | "chip" | "cashout" | "jump" | "splash" | "boom" | "jackpot";
+  | "elevator" | "spin" | "reelStop" | "cardFlip" | "chip" | "cashout" | "jump" | "splash" | "boom" | "jackpot"
+  // Floor 3: rooftop
+  | "twinkle" | "shutter" | "sizzle";
 
 export const SFX_NAMES: SfxName[] = [
   "click", "interact", "sit", "stand", "pour", "froth", "ding", "beans",
   "purr", "meow", "place", "win", "lose", "page", "gift", "emote", "jukebox",
   "elevator", "spin", "reelStop", "cardFlip", "chip", "cashout", "jump", "splash", "boom", "jackpot",
+  "twinkle", "shutter", "sizzle",
 ];
 
 type Ctx = BaseAudioContext;
@@ -171,6 +174,23 @@ const RECIPES: Record<SfxName, Recipe> = {
     tone(c, out, t + 0.3, { f0: 880, dur: 0.4, vel: 0.16, attack: 0.002 });
     tone(c, out, t + 0.7, { type: "triangle", f0: 90, f1: 150, dur: 0.6, vel: 0.2, attack: 0.08 }); // the lift hum
     burst(c, out, n, t + 0.7, { filter: "lowpass", f0: 300, dur: 0.6, vel: 0.06, attack: 0.1 });
+  },
+  twinkle: (c, out, t) => {
+    // a little rising glissando of star chimes (a wish being made)
+    [1568, 1976, 2349, 3136].forEach((f, i) => tone(c, out, t + i * 0.07, { f0: f, dur: 0.5, vel: 0.12, attack: 0.004 }));
+    tone(c, out, t + 0.32, { f0: 4186, dur: 0.7, vel: 0.07, attack: 0.004 });
+  },
+  shutter: (c, out, t, n) => {
+    // instant camera: flash whine, mechanical click, then the print whirring out
+    tone(c, out, t, { f0: 2400, f1: 5200, dur: 0.12, vel: 0.08, attack: 0.02 });
+    burst(c, out, n, t + 0.12, { filter: "bandpass", f0: 3200, q: 1.5, dur: 0.035, vel: 0.3, attack: 0.002 });
+    burst(c, out, n, t + 0.17, { filter: "bandpass", f0: 1800, q: 1.5, dur: 0.05, vel: 0.22, attack: 0.002 });
+    burst(c, out, n, t + 0.3, { filter: "lowpass", f0: 700, f1: 1400, dur: 0.55, vel: 0.07, attack: 0.08 });
+  },
+  sizzle: (c, out, t, n) => {
+    // a marshmallow over the fire: crackle and fizz
+    burst(c, out, n, t, { filter: "highpass", f0: 4500, dur: 0.4, vel: 0.1, attack: 0.02 });
+    for (let i = 0; i < 5; i++) burst(c, out, n, t + 0.05 + i * 0.07, { filter: "bandpass", f0: 1500 + i * 400, q: 2, dur: 0.03, vel: 0.2, attack: 0.002 });
   },
   spin: (c, out, t, n) => {
     // a ratchet that slows down: wheel / reel spinning

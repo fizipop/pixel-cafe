@@ -35,7 +35,7 @@ export function buildArcadeFloor(b: FloorBuilder) {
   b.place("elevator_up", up.x, up.y);
   b.solid(up.solid.x, up.solid.y, up.solid.w, up.solid.h, true);
   neonGlow(scene, up.x + up.w / 2, up.y + 12, 0.5, 0x7fe0a9, 0.28);
-  label(scene, up.x + up.w / 2, up.y - 2, "ARCADE ▲", "#7fe0a9", 14).setDepth(up.y + up.h + 1);
+  label(scene, up.x + up.w / 2, up.y - 2, "ELEVATOR ▲", "#7fe0a9", 14).setDepth(up.y + up.h + 1);
 
   // ---- Floor 2: room, walls
   scene.add.image(FLOOR2_X, 0, "arc_bg").setOrigin(0).setDepth(0);
@@ -58,7 +58,7 @@ export function buildArcadeFloor(b: FloorBuilder) {
   b.place("elevator_down", down.x, down.y);
   b.solid(down.solid.x, down.solid.y, down.solid.w, down.solid.h);
   neonGlow(scene, down.x + down.w / 2, down.y + 12, 0.5, 0xf2c36b, 0.28);
-  label(scene, down.x + down.w / 2, down.y - 2, "MAIN CAFE ▼", "#f2c36b", 14).setDepth(down.y + down.h + 1);
+  label(scene, down.x + down.w / 2, down.y - 2, "ELEVATOR ▼", "#f2c36b", 14).setDepth(down.y + down.h + 1);
 
   // cabinets and the leaderboard kiosk
   for (const m of MACHINES) {

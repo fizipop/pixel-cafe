@@ -2,7 +2,7 @@
 import { createServer, type Server as HttpServer } from "node:http";
 import { Server, type Socket } from "socket.io";
 import type { ClientToServer, ServerToClient } from "../src/shared/protocol.ts";
-import { ARCADE_EVENTS, MOVE_HZ } from "../src/shared/protocol.ts";
+import { ARCADE_EVENTS, MOVE_HZ, ROOFTOP_EVENTS } from "../src/shared/protocol.ts";
 import { Room, type Conn, type RoomOptions } from "./room.ts";
 
 export type CafeServer = { room: Room; http: HttpServer; io: Server<ClientToServer, ServerToClient>; close: () => Promise<void> };
@@ -63,6 +63,14 @@ export function createCafeServer(opts: { origins?: string[]; room?: RoomOptions 
         const ack = args.at(-1);
         const payload = typeof args[0] === "function" ? undefined : args[0];
         reply(ack, room.arcadeEvent(id, ev, payload));
+      }));
+    }
+    // every Floor 3 request goes to the rooftop, which answers through the ack
+    for (const ev of ROOFTOP_EVENTS) {
+      (socket as Socket).on(ev, safe((...args: unknown[]) => {
+        const ack = args.at(-1);
+        const payload = typeof args[0] === "function" ? undefined : args[0];
+        reply(ack, room.rooftopEvent(id, ev, payload));
       }));
     }
     socket.on("disconnect", safe(() => room.leave(id)));

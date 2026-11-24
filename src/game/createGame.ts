@@ -3,6 +3,7 @@ import { CafeScene, type CafeCallbacks } from "./CafeScene";
 import type { DrinkKind, Rating } from "@/lib/drinks";
 import type { WorldStore } from "./worldState";
 import type { NetClient } from "@/net/client";
+import type { Floor } from "@/shared/floors";
 
 export type { CafeCallbacks, DrinkKind, Rating };
 
@@ -12,6 +13,8 @@ export type CafeHandle = {
   setInputEnabled: (enabled: boolean) => void;
   serveDrink: (kind: DrinkKind, rating: Rating) => void;
   talkToBarista: () => void;
+  /** Ride the elevator to another floor (from the floor picker). */
+  travel: (floor: Floor) => void;
   /** Stand up from the table you are sitting at (used by the blackjack / roulette windows). */
   standUp: () => void;
   destroy: () => void;
@@ -55,6 +58,7 @@ export function createCafeGame(
     setInputEnabled: (enabled) => scene()?.setInputEnabled(enabled),
     serveDrink: (kind, rating) => scene()?.serveDrink(kind, rating),
     talkToBarista: () => scene()?.talkToBarista(),
+    travel: (floor) => void scene()?.travel(floor),
     standUp: () => scene()?.standUpFromHud(),
     destroy: () => {
       if (destroyed) return;

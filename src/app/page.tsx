@@ -42,7 +42,7 @@ const CUP = [
 const FEATURES = [
   { title: "Draw yourself", text: "No presets. Paint your own pixel character in a real pixel editor, and keep as many outfits as you like." },
   { title: "Stay anonymous", text: "You get a random name like MistyMuffin472. No real name, no photo, no profile to curate." },
-  { title: "Hang out", text: "Walk around with other real people, chat with whoever is nearby, make a drink, change the music and weather together, play Tic-Tac-Toe, sign the guestbook, claim a private table with friends, vote for the best outfit of the day, or ride the elevator up to the Arcade." },
+  { title: "Hang out", text: "Walk around with other real people, chat with whoever is nearby, make a drink, change the music and weather together, play Tic-Tac-Toe, sign the guestbook, claim a private table with friends, vote for the best outfit of the day, or ride the elevator up to the Arcade and the Rooftop Lounge." },
 ];
 
 const ROADMAP = [
@@ -63,11 +63,15 @@ const ROADMAP = [
   { name: "Cafe Mines: a 5×5 board of spilled coffee, build the multiplier and cash out", status: "Open now" },
   { name: "To the Moon: a shared rocket, cash out before it fizzles", status: "Open now" },
   { name: "Cat Ice Jump: a playable arcade cabinet, plus Leaderboards for top runs, biggest multipliers and richest beans", status: "Open now" },
+  { name: "Floor 3 · Rooftop Lounge: pick any floor from the elevator, then step out under fairy lights and a twinkling night skyline, with its own cozy piano, breeze and rain soundtrack", status: "Open now" },
+  { name: "Campfire & marshmallows: sit on a log by the fire and roast one golden-brown (don't burn it) for a few bonus Cafe Beans", status: "Open now" },
+  { name: "Stargazing telescope: named constellations, shooting stars and anonymous wishes for other stargazers to read", status: "Open now" },
+  { name: "Rooftop Polaroids: a group photo of everyone up there, pinned to a shared wall that is saved on the server", status: "Open now" },
   { name: "Voice Lounge", status: "Someday" },
 ];
 
 const ARCADE_NOTE =
-  "Everything upstairs uses Cafe Beans: a fictional play currency you earn by making drinks. Beans can't be bought, cashed out or traded, and if you ever run dry you get a free daily starter top-up.";
+  "The Arcade uses Cafe Beans: a fictional play currency you earn by making drinks (and by roasting a perfect marshmallow on the Rooftop). Beans can't be bought, cashed out or traded, and if you ever run dry you get a free daily starter top-up.";
 
 export default function Home() {
   return (

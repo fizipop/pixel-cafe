@@ -6,6 +6,7 @@ import type { WorldAction, WorldState } from "../game/worldState.ts";
 import type { Entry } from "../lib/guestbook.ts";
 import type { Floor } from "./floors.ts";
 import type { BjResult, Card, RouletteBet, SlotSymbol } from "./arcade.ts";
+import type { PackedSprite, RoastGrade } from "./rooftop.ts";
 
 // ------------------------------------------------------------------ limits
 export const CHAT_MAX = 150; // characters
@@ -146,6 +147,19 @@ export type BlackjackView = {
   canDouble: boolean;
 };
 
+// ------------------------------------------------------------------ Floor 3: rooftop views
+/** Your marshmallow is on the stick: heat rises at `rate` x real time (see roastHeat in shared/rooftop.ts). */
+export type RoastStart = { rate: number };
+export type RoastResult = { grade: RoastGrade; heat: number; perfect: boolean; bonus: number; beans: number };
+
+/** An anonymous wish on the star wall. `id` is public; the author's device is never sent. */
+export type StarWishView = { id: string; text: string; ts: number; mine: boolean };
+export type StarsView = { wishes: StarWishView[] };
+
+export type PolaroidPerson = { name: string; sprite: PackedSprite };
+/** One photo on the Rooftop Polaroid Wall. */
+export type PolaroidView = { id: string; ts: number; by: string; people: PolaroidPerson[] };
+
 export type IceStart = { token: number };
 export type IceFinish = { beans: number; best: boolean; score: number; rank: number | null };
 
@@ -197,7 +211,19 @@ export interface ClientToServer {
   "ice:start": (ack: (r: Ack<IceStart>) => void) => void;
   "ice:finish": (p: { token: number; score: number }, ack: (r: Ack<IceFinish>) => void) => void;
   "arcade:board": (ack: (r: Ack<{ view: BoardView }>) => void) => void;
+  // ---- Floor 3 rooftop (every one answers with an Ack)
+  "roast:start": (ack: (r: Ack<RoastStart>) => void) => void;
+  "roast:pull": (ack: (r: Ack<RoastResult>) => void) => void;
+  "stars:join": (ack: (r: Ack<StarsView>) => void) => void;
+  "stars:leave": () => void;
+  "stars:wish": (p: { text: string }, ack: (r: Ack<StarsView>) => void) => void;
+  "polaroid:take": (ack: (r: Ack<{ photo: PolaroidView }>) => void) => void;
+  "polaroid:wall": (ack: (r: Ack<{ photos: PolaroidView[] }>) => void) => void;
 }
+
+/** The rooftop requests the server routes to the Rooftop class (see server/rooftop.ts). */
+export const ROOFTOP_EVENTS = ["roast:start", "roast:pull", "stars:join", "stars:leave", "stars:wish", "polaroid:take", "polaroid:wall"] as const;
+export type RooftopEvent = (typeof ROOFTOP_EVENTS)[number];
 
 /** The arcade requests the server routes to the Arcade class (see server/arcade.ts). */
 export const ARCADE_EVENTS = [
@@ -230,4 +256,6 @@ export interface ServerToClient {
   "crash:state": (p: CrashView | null) => void; // only while you watch the To the Moon terminal
   "roulette:state": (p: RouletteView | null) => void; // only while you sit or watch at the roulette table
   "bj:state": (p: BlackjackView | null) => void; // only while you sit at the blackjack table
+  "stars:wishes": (p: { wishes: StarWishView[]; fresh: string | null }) => void; // only while you are at the telescope; `fresh` = id of a wish that just arrived
+  "polaroid:new": (p: PolaroidView) => void; // a photo was just pinned (sent to everyone on Floor 3)
 }

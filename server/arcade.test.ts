@@ -123,7 +123,8 @@ test("floors: need to be at the elevator, standing, and ask for a real floor", (
   assert.equal(room.goFloor("a", { floor: 2 }).ok, false, "too far from the elevator");
   room.players.get("a")!.state.x = STAIRS[1].spot.x; room.players.get("a")!.state.y = STAIRS[1].spot.y;
   assert.equal(room.goFloor("a", { floor: 1 }).ok, false, "already there");
-  assert.equal(room.goFloor("a", { floor: 3 as any }).ok, false);
+  assert.equal(room.goFloor("a", { floor: 4 as any }).ok, false);
+  assert.equal(room.goFloor("a", { floor: "3" as any }).ok, false);
   assert.equal(room.goFloor("nobody", { floor: 2 }).ok, false);
   assert.equal(sit("a", "t0-top").ok, true);
   assert.equal(room.goFloor("a", { floor: 2 }).ok, false, "seated");

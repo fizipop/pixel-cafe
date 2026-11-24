@@ -1,4 +1,4 @@
-// Persistence for the shared boards: rumours, guestbook and outfit votes.
+// Persistence for the shared boards: rumours, guestbook, outfit votes, wallets, arcade scores, star wishes and the Polaroid Wall.
 //
 // The rest of the server only talks to the `Repository` interface, so moving to Supabase later
 // means writing one more class that implements it (the methods are the whole API). Two
@@ -7,6 +7,7 @@
 //   JsonFileRepository  - the same, plus a debounced atomic write to a local JSON file
 //                         (server/data.json by default, gitignored)
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { isPackedSprite, type PackedSprite } from "../src/shared/rooftop.ts";
 
 export type RumourRecord = { id: string; text: string; createdAt: number; author: string };
 export type GuestRecord = { id: string; name: string; text: string; createdAt: number; author: string };
@@ -17,6 +18,10 @@ export type WalletRecord = { beans: number; name: string; topupDay: string; upda
 /** A personal best on an arcade board (Cat Ice Jump score, or biggest To the Moon multiplier). */
 export type ScoreRecord = { name: string; value: number; ts: number };
 export type BoardId = "ice" | "moon";
+/** Floor 3: an anonymous star wish (`author` is the device id, used only to rate limit and mark "mine"). */
+export type WishRecord = { id: string; text: string; ts: number; author: string };
+/** Floor 3: one group Polaroid pinned to the Rooftop Polaroid Wall (sprites are stored run-length packed). */
+export type PolaroidRecord = { id: string; ts: number; by: string; people: { name: string; sprite: PackedSprite }[] };
 
 export interface Repository {
   // rumours (newest first)
@@ -44,6 +49,12 @@ export interface Repository {
   getBest(board: BoardId, clientId: string): ScoreRecord | undefined;
   setBest(board: BoardId, clientId: string, r: ScoreRecord): void;
   listBest(board: BoardId): { clientId: string; record: ScoreRecord }[];
+  // Floor 3: star wishes and the Polaroid Wall (both newest first)
+  listWishes(): WishRecord[];
+  addWish(w: WishRecord, cap: number): void;
+  removeWishesBefore(ts: number): void;
+  listPolaroids(): PolaroidRecord[];
+  addPolaroid(p: PolaroidRecord, cap: number): void;
   /** Write anything pending to durable storage (no-op for memory). */
   flush(): void;
 }
@@ -59,11 +70,13 @@ export type PersistedData = {
   wallets: Record<string, WalletRecord>;
   ice: Record<string, ScoreRecord>;
   moon: Record<string, ScoreRecord>;
+  wishes: WishRecord[];
+  polaroids: PolaroidRecord[];
 };
 
 export const emptyData = (): PersistedData => ({
   version: 1, rumours: [], rumourLikes: {}, guestbook: [], guestbookDays: {}, outfits: {}, votes: [],
-  wallets: {}, ice: {}, moon: {},
+  wallets: {}, ice: {}, moon: {}, wishes: [], polaroids: [],
 });
 
 const isStr = (v: unknown): v is string => typeof v === "string";
@@ -110,6 +123,15 @@ export function sanitizeData(raw: unknown): PersistedData {
     for (const [id, r] of Object.entries(src)) {
       if (isObj(r) && isStr(r.name) && isNum(r.value) && r.value >= 0) out[board][id] = { name: r.name, value: r.value, ts: isNum(r.ts) ? r.ts : 0 };
     }
+  }
+  for (const w of list(raw.wishes)) {
+    if (isObj(w) && isStr(w.id) && isStr(w.text) && isNum(w.ts) && isStr(w.author)) out.wishes.push({ id: w.id, text: w.text, ts: w.ts, author: w.author });
+  }
+  for (const p of list(raw.polaroids)) {
+    if (!isObj(p) || !isStr(p.id) || !isNum(p.ts) || !isStr(p.by) || !Array.isArray(p.people)) continue;
+    const people: PolaroidRecord["people"] = [];
+    for (const q of p.people) if (isObj(q) && isStr(q.name) && isPackedSprite(q.sprite)) people.push({ name: q.name, sprite: q.sprite });
+    if (people.length > 0 && people.length <= 6) out.polaroids.push({ id: p.id, ts: p.ts, by: p.by, people });
   }
   return out;
 }
@@ -191,6 +213,25 @@ export class MemoryRepository implements Repository {
     this.changed();
   }
   listBest(board: BoardId) { return Object.entries(this.data[board]).map(([clientId, record]) => ({ clientId, record })); }
+
+  listWishes() { return this.data.wishes; }
+  addWish(w: WishRecord, cap: number) {
+    this.data.wishes.unshift(w);
+    if (this.data.wishes.length > cap) this.data.wishes.length = cap;
+    this.changed();
+  }
+  removeWishesBefore(ts: number) {
+    const keep = this.data.wishes.filter((w) => w.ts >= ts);
+    if (keep.length === this.data.wishes.length) return;
+    this.data.wishes = keep;
+    this.changed();
+  }
+  listPolaroids() { return this.data.polaroids; }
+  addPolaroid(p: PolaroidRecord, cap: number) {
+    this.data.polaroids.unshift(p);
+    if (this.data.polaroids.length > cap) this.data.polaroids.length = cap;
+    this.changed();
+  }
 
   flush() {}
 }
