@@ -8,7 +8,8 @@ const STOPS = [700, 1100, 1500]; // when each reel stops (ms after the spin star
 const pick = () => SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)];
 
 /** Pixel Slots: three reels with cafe symbols. The server rolls the result; this just animates it. */
-export default function Slots({ net, onClose, sfx }: ArcadeProps) {
+export default function Slots({ net, onClose, sfx, announce }: ArcadeProps) {
+  const losses = useRef(0);
   const beans = useBeans(net);
   const [bet, setBet] = useState(10);
   const [reels, setReels] = useState<SlotSymbol[]>(["cup", "bean", "seven"]);
@@ -51,13 +52,20 @@ export default function Slots({ net, onClose, sfx }: ArcadeProps) {
       setBusy(false);
       if (r.win > 0) {
         sfx(r.mult >= 50 ? "jackpot" : "win");
+        sfx("coin");
+        if (r.mult >= 50) announce("JACKPOT!");
+        else if (r.mult >= 12) announce("BIG WIN!");
+        else if (r.mult >= 1) announce("WINNER!");
+        else if (r.reels[0] === r.reels[1]) { sfx("nearMiss"); announce("SO CLOSE!"); } // a pair that missed the third reel
+        losses.current = 0;
         setMsg({ text: r.mult >= 50 ? `JACKPOT! +${r.win} beans` : `You win +${r.win} beans (×${r.mult})`, good: true });
       } else {
         sfx("lose");
+        if (++losses.current % 5 === 0) announce("BETTER LUCK NEXT TIME!");
         setMsg({ text: "No luck this time.", good: false });
       }
     }, STOPS[2] + 250));
-  }, [bet, busy, clearTimers, net, sfx]);
+  }, [announce, bet, busy, clearTimers, net, sfx]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

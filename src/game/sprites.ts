@@ -1,6 +1,6 @@
 import * as Phaser from "phaser";
 import { make, rect, type Ctx } from "./art";
-import { LOOKS, NPC_TEXTURE_SIZE, renderNpcPixels } from "./npcArt";
+import { LOOKS, NPC_TEXTURE_SIZE, renderNpcBackPixels, renderNpcPixels } from "./npcArt";
 
 // Textures for NPCs, props and emote bubbles (all drawn in code).
 
@@ -86,14 +86,14 @@ const DOTS = ["dd.dd.dd", "dd.dd.dd"];
 export function buildSpriteTextures(scene: Phaser.Scene) {
   // NPC bodies
   for (const [id, look] of Object.entries(LOOKS)) {
-    const key = `npc_${id}`;
-    if (scene.textures.exists(key)) continue;
-    const pixels = renderNpcPixels(look);
-    make(scene, key, NPC_TEXTURE_SIZE, NPC_TEXTURE_SIZE, (c) =>
-      pixels.forEach((color, i) => {
-        if (color) rect(c, color, i % NPC_TEXTURE_SIZE, Math.floor(i / NPC_TEXTURE_SIZE), 1, 1);
-      }),
-    );
+    for (const [key, pixels] of [[`npc_${id}`, renderNpcPixels(look)], [`npc_${id}_back`, renderNpcBackPixels(look)]] as const) {
+      if (scene.textures.exists(key)) continue;
+      make(scene, key, NPC_TEXTURE_SIZE, NPC_TEXTURE_SIZE, (c) =>
+        pixels.forEach((color, i) => {
+          if (color) rect(c, color, i % NPC_TEXTURE_SIZE, Math.floor(i / NPC_TEXTURE_SIZE), 1, 1);
+        }),
+      );
+    }
   }
 
   // emote bubbles

@@ -12,7 +12,7 @@ import { RACE, fmtTime, newRace, positions, raceBeans, stepRace, track } from ".
 import { FLOOR2_X, STAIRS } from "../shared/floors.ts";
 import { WALL_H, WORLD_H, WORLD_W, TILE } from "./constants.ts";
 import { NavGrid } from "./pathing.ts";
-import { MACHINES, POKER, POOL_TABLE, ROULETTE_WATCH, arcadeSeats, arcadeSeatInfo, arcadeSolids, TABLE_GAME } from "./arcadeLayout.ts";
+import { ARCADE_H, MACHINES, POKER, POOL_TABLE, ROULETTE_WATCH, arcadeSeats, arcadeSeatInfo, arcadeSolids, arcadeWalls, TABLE_GAME } from "./arcadeLayout.ts";
 import { BEAT, CHART, SONG_MS, RANK_BEANS, accuracy, comboMult, judge, newScore, rankOf, scoreRun, scoreStep, trackStep } from "../shared/beat.ts";
 
 // ------------------------------------------------------------------ poker
@@ -465,14 +465,14 @@ test("floor 2 layout: the new cabinets and tables are collision-safe, reachable,
     assert.equal(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h, false, `solid ${i} overlaps solid ${j}`);
   }
   const x0 = FLOOR2_X;
-  const walls = [
-    { x: x0, y: 0, w: WORLD_W, h: WALL_H }, { x: x0, y: 0, w: TILE, h: WORLD_H },
-    { x: x0 + WORLD_W - TILE, y: 0, w: TILE, h: WORLD_H }, { x: x0, y: WORLD_H - TILE, w: WORLD_W, h: TILE },
-  ];
-  const nav = new NavGrid(x0 + WORLD_W, WORLD_H, [...solids, ...walls]);
+  const walls = arcadeWalls(TILE, WALL_H);
+  void WORLD_H;
+  const nav = new NavGrid(x0 + WORLD_W, ARCADE_H, [...solids, ...walls]);
   const from = nav.nearestFree(STAIRS[2].arrive.x, STAIRS[2].arrive.y)!;
   const games = MACHINES.filter((m) => m.game).map((m) => m.game);
-  assert.deepEqual([...games].sort(), ["board", "beat", "fighter", "mines", "moon", "penguin", "racer", "slots", "slots"].sort());
+  // Neon Drift GP moved from a stand-up cabinet to two sit-down rigs (seats), Beat Battle is now two stations, and the
+  // casino row added Huff & Xtra Puff, its BONUS machine, Plinko and the lottery booth (four slot machines in all)
+  assert.deepEqual([...games].sort(), ["board", "beat", "beat", "fighter", "huff", "huffBonus", "lottery", "mines", "moon", "penguin", "plinko", "slots", "slots"].sort());
   assert.ok(!games.includes("ice" as never), "Cat Ice Jump is gone");
   const goals = [
     ...MACHINES.filter((m) => m.game).map((m) => ({ name: m.id, ...m.spot })),

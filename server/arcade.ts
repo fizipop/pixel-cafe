@@ -128,6 +128,9 @@ export class Arcade {
     const seat = arcadeSeatInfo(seatId);
     switch (event) {
       case "slots:spin": return this.solo.slots(w, x.bet);
+      case "plinko:drop": return this.solo.plinko(w, x.bet, x.gate);
+      case "huff:spin": return this.solo.huff(w, x.machine, x.bet);
+      case "lottery:enter": return this.solo.lottery(w, x.pick);
       case "mines:state": return this.solo.minesState(w);
       case "mines:start": return this.solo.minesStart(w, x.bet, x.mines);
       case "mines:reveal": return this.solo.minesReveal(w, x.tile);

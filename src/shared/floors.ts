@@ -8,6 +8,12 @@ export type Floor = 1 | 2 | 3;
 export const FLOORS: Floor[] = [1, 2, 3];
 export const FLOOR2_X = 1280;
 export const FLOOR3_X = 2560;
+/** Floor 2 (the Arcade & Casino) is taller than the other floors, to give its zones room to breathe. */
+export const FLOOR2_H = 1088;
+/** Height of a floor in world pixels. */
+export const floorH = (f: Floor) => (f === 2 ? FLOOR2_H : WORLD_H);
+/** The tallest floor: the physics world has to fit it. */
+export const WORLD_TOTAL_H = Math.max(WORLD_H, FLOOR2_H);
 
 export const FLOOR_NAMES: Record<Floor, string> = {
   1: "Floor 1 · Main Cafe",
@@ -19,7 +25,7 @@ export const isFloor = (v: unknown): v is Floor => v === 1 || v === 2 || v === 3
 
 /** Left edge of a floor in world pixels. */
 export const floorX0 = (f: Floor) => (f === 3 ? FLOOR3_X : f === 2 ? FLOOR2_X : 0);
-export const floorBounds = (f: Floor) => ({ x: floorX0(f), y: 0, w: WORLD_W, h: WORLD_H });
+export const floorBounds = (f: Floor) => ({ x: floorX0(f), y: 0, w: WORLD_W, h: floorH(f) });
 /** Total width of the shared world (all floors side by side). */
 export const WORLD_TOTAL_W = FLOOR3_X + WORLD_W;
 
@@ -53,5 +59,5 @@ export const floorOfSeat = (seatId: string): Floor =>
 /** Keep a position inside its floor's walls-to-walls rectangle. */
 export function clampToFloor(floor: Floor, x: number, y: number) {
   const x0 = floorX0(floor);
-  return { x: Math.min(x0 + WORLD_W, Math.max(x0, x)), y: Math.min(WORLD_H, Math.max(0, y)) };
+  return { x: Math.min(x0 + WORLD_W, Math.max(x0, x)), y: Math.min(floorH(floor), Math.max(0, y)) };
 }

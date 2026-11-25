@@ -301,6 +301,33 @@ export class Raster {
     this.grow(x0, y0, x1, y1);
   }
 
+  /**
+   * A flat, angular plane: the polygon `pts` ([x0, y0, x1, y1, ...] in raster px) at depth z, lit as one facet with the
+   * normal (nx, ny, nz). For the hard planes of a face (jaw, cheekbone, nose bridge) where round primitives look soft.
+   */
+  facet(pts: number[], z: number, nx: number, ny: number, nz: number, matId: number, o: PartOpts = {}) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let k = 0; k < pts.length; k += 2) { x0 = Math.min(x0, pts[k]); x1 = Math.max(x1, pts[k]); y0 = Math.min(y0, pts[k + 1]); y1 = Math.max(y1, pts[k + 1]); }
+    const bx0 = Math.max(0, Math.floor(x0)), bx1 = Math.min(this.w, Math.ceil(x1) + 1), by0 = Math.max(0, Math.floor(y0)), by1 = Math.min(this.h, Math.ceil(y1) + 1);
+    if (bx1 <= bx0 || by1 <= by0) return;
+    const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+    const m = pts.length / 2;
+    for (let y = by0; y < by1; y++) for (let x = bx0; x < bx1; x++) {
+      const sx = x + 0.5, sy = y + 0.5;
+      let inside = false; // even-odd point in polygon
+      for (let a = 0, b = m - 1; a < m; b = a++) {
+        const ax = pts[a * 2], ay = pts[a * 2 + 1], bxx = pts[b * 2], byy = pts[b * 2 + 1];
+        if ((ay > sy) !== (byy > sy) && sx < ((bxx - ax) * (sy - ay)) / (byy - ay) + ax) inside = !inside;
+      }
+      if (!inside) continue;
+      const i = y * this.w + x;
+      let id = matId;
+      if (o.paint) { const p = o.paint((sy - y0) / Math.max(1, y1 - y0), ((sx - x0) / Math.max(1, x1 - x0)) * 2 - 1, x, y); if (p >= 0) id = p; }
+      this.shadePixel(i, x, y, nx, ny, nz, z, id, o);
+    }
+    this.grow(bx0, by0, bx1, by1);
+  }
+
   /** Paint a flat pixel on top of a given material only (eyes, mouths, seams): keeps details off overlapping limbs. */
   decal(x: number, y: number, col: number, onlyMat = -1) {
     x = Math.round(x); y = Math.round(y);

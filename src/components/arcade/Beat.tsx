@@ -84,7 +84,9 @@ class Song {
 }
 
 /** Beat Battle: four falling arrows, D F J K (or the arrow keys) to hit them on the line, and a tug-of-war with a rival DJ. Pick Easy, Normal, Hard or Insane first. */
-export default function Beat({ net, onClose, sfx }: ArcadeProps) {
+export default function Beat({ net, onClose, sfx, announce }: ArcadeProps) {
+  const annRef = useRef(announce);
+  useEffect(() => { annRef.current = announce; }, [announce]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const song = useRef<Song | null>(null);
   const token = useRef(0);
@@ -125,12 +127,14 @@ export default function Beat({ net, onClose, sfx }: ArcadeProps) {
     let combo = 0;
     const flash = [0, 0, 0, 0];
     let finished = false;
+    annRef.current("GET READY!");
 
     const resolve = (i: number, j: Judge) => {
       letters[i] = j;
       const gap = i === 0 ? chart[0].t : chart[i].t - chart[i - 1].t;
       live = scoreStep(live, j, gap);
       lastResolved = Math.max(lastResolved, i);
+      if (live.combo > combo && live.combo % 25 === 0) sfxRef.current("streak"); // combo milestones
       combo = live.combo;
       if (j === "M") view.onMiss();
     };
@@ -162,10 +166,15 @@ export default function Beat({ net, onClose, sfx }: ArcadeProps) {
       const score = scoreRun(seq, chart) ?? live;
       const rank = rankOf(score, chart.length);
       const dd = played.current;
-      if (score.failed) { setFinal({ score, rank, diff: dd, failed: true }); setPhase("done"); sfxRef.current("lose"); return; }
+      if (score.failed) { setFinal({ score, rank, diff: dd, failed: true }); setPhase("done"); sfxRef.current("lose"); annRef.current("TRY AGAIN!"); return; }
       const r = await net.call<RunFinish & { rankLetter: string }>("beat:finish", { token: token.current, seq });
       setFinal(r.ok ? { score, rank, diff: dd, fin: r } : { score, rank, diff: dd, err: r.reason });
       if (r.ok && r.beans > 0) sfxRef.current("cashout");
+      if (score.miss === 0) annRef.current("FULL COMBO!");
+      else if (rank === "S") annRef.current("INCREDIBLE!");
+      else if (r.ok && r.best) annRef.current("NEW RECORD!");
+      else if (rank === "A" || rank === "B") annRef.current("WINNER!");
+      else annRef.current("BETTER LUCK NEXT TIME!");
       setPhase("done");
     };
 

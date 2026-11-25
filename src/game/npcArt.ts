@@ -83,6 +83,96 @@ export const LOOKS: Record<string, NpcLook> = {
   },
 };
 
+// ---- the Pixel Restaurant startup crew (Floor 1, table 6), Togi and the Arcade & Casino crowd (Floor 2) -----------
+// Each look is original pixel art built on the shared body. A heavier build widens the torso into the spare columns.
+const wide = (rows: number[], ch = "t"): Overlay[] => rows.map((r) => [r, 1, ch.repeat(12)]);
+
+Object.assign(LOOKS, {
+  // Faizan: styled-up black quiff, goatee with a moustache, maroon hoodie, dark jeans, white trainers
+  faizan: {
+    pal: { h: "#16100c", s: "#b07a52", e: "#1f140d", t: "#7a2d3a", T: "#5a1f2a", a: "#7a2d3a", p: "#2a3a5a", b: "#f4f4f4", B: "#16100c", w: "#e8d8c8" },
+    overlays: [[0, 5, "hhhh"], [0, 3, "h"], [1, 2, "hhhhhhhhhh"], [3, 3, "h"], [3, 10, "h"], [5, 5, "BBBB"], [6, 5, "BBBB"], [7, 6, "ww"], [10, 6, "w"], [10, 7, "w"]],
+  },
+  // Puneet: saffron turban, full beard, heavier build, teal polo, khakis
+  puneet: {
+    pal: { h: "#16100c", s: "#a8714a", e: "#1f140d", t: "#2a8a8a", T: "#1f6a6a", a: "#2a8a8a", p: "#c4a46a", b: "#4a3222", C: "#e88a1a", K: "#ffb04a", B: "#1a1210" },
+    overlays: [
+      [0, 3, "CCCCCCCC"], [1, 2, "CKCCCCKCCC"], [2, 2, "CCCKCCCCCC"], [3, 3, "CCCCCCCC"],
+      [4, 3, "B"], [4, 10, "B"], [5, 3, "BssssssB"], [6, 3, "BBBBBBBB"], [7, 4, "BBBBBB"],
+      ...wide([8, 9, 10, 11, 12, 13]), [9, 0, "a"], [10, 0, "a"], [9, 13, "a"], [10, 13, "a"], [12, 1, "TTTTTTTTTTTT"],
+    ],
+  },
+  // Cris: twin of Nick. Side-swept brown hair, small goatee, green flannel shirt
+  cris: {
+    pal: { h: "#6a4428", s: "#f1c8a0", e: "#1f140d", t: "#3a7a4a", T: "#2a5a3a", a: "#3a7a4a", p: "#3a4a6a", b: "#2a1a10", P: "#24502f", B: "#6a4428" },
+    overlays: [[1, 2, "hhhhhhhhh"], [2, 2, "hh"], [3, 3, "hhh"], [6, 6, "BB"], [8, 2, "P..P..P..P"], [10, 2, "PPPPPPPPPP"], [12, 3, "P..P..P"]],
+  },
+  // Nick: twin of Cris. Same face and goatee, navy beanie, grey tee with a pixel logo
+  nick: {
+    pal: { h: "#6a4428", s: "#f1c8a0", e: "#1f140d", t: "#9a9aa8", T: "#7a7a88", a: "#9a9aa8", p: "#2a2a34", b: "#d9304a", C: "#2a3a6a", K: "#3a4a8a", B: "#6a4428", L: "#f2c36b" },
+    overlays: [[0, 3, "CCCCCCCC"], [1, 2, "CKCKCKCKCC"], [2, 3, "CCCCCCCC"], [6, 6, "BB"], [9, 6, "LL"], [10, 5, "L..L"]],
+  },
+  // Togi: backwards red snapback (strap showing), black hoodie with the hood down and drawstrings, mint sneakers
+  togi: {
+    pal: { h: "#2a1a10", s: "#c68e5b", e: "#1f140d", t: "#26262e", T: "#18181e", a: "#26262e", p: "#1a1a20", b: "#7fe0a9", C: "#d9304a", K: "#ff6a7a", H: "#3a3a46", w: "#fff6e0", G: "#f2c36b" },
+    overlays: [[0, 4, "CCCCCC"], [1, 3, "CCKKCCCC"], [2, 3, "CCC.CCCC"], [2, 11, "CC"], [7, 3, "HHHHHHHH"], [8, 2, "H"], [8, 11, "H"], [9, 6, "w"], [10, 6, "w"], [9, 8, "w"], [10, 8, "w"], [12, 5, "GGGG"]],
+  },
+  // the Degenerate: rumpled white shirt, loosened red tie, messy hair, five o'clock shadow
+  vince: {
+    pal: { h: "#3a2a1a", s: "#e8b890", e: "#1f140d", t: "#e8e4d8", T: "#c8c4b8", a: "#e8e4d8", p: "#3a3a46", b: "#2a1a10", R: "#c02030", B: "#9a7a60" },
+    overlays: [[0, 3, "h.hh.hh"], [6, 4, "BBBBBB"], [7, 6, "RR"], [8, 6, "RR"], [9, 7, "R"], [10, 6, "RR"]],
+  },
+  // the First-Timer: pastel windbreaker, bright beanie, little backpack straps, sneakers
+  pip: {
+    pal: { h: "#e8c060", s: "#ffe0bd", e: "#1f140d", t: "#9fd8f0", T: "#7fb8d0", a: "#f28fad", p: "#f2d27a", b: "#ffffff", C: "#7fe0a9", S: "#3a3a46" },
+    overlays: [[0, 4, "CCCCCC"], [1, 3, "CCCCCCCC"], [8, 3, "S"], [9, 3, "S"], [10, 3, "S"], [8, 10, "S"], [9, 10, "S"], [10, 10, "S"]],
+  },
+  // the Big Winner: gold lamé jacket over a black tee, shades, gold chain
+  goldie: {
+    pal: { h: "#1a1210", s: "#8a5a3a", e: "#05030c", t: "#d8a830", T: "#b08820", a: "#d8a830", p: "#1a1a20", b: "#f2c36b", G: "#05030c", N: "#05030c", Y: "#fff0a0" },
+    overlays: [[4, 3, "sGGGGGGs"], [8, 5, "NNNN"], [9, 5, "NNNN"], [10, 5, "NNNN"], [9, 4, "Y"], [10, 5, "Y"], [10, 8, "Y"], [9, 9, "Y"]],
+  },
+  // the Heavy Bettor: charcoal three-piece suit, slicked silver hair, gold cufflinks
+  sterling: {
+    pal: { h: "#c4c4cc", s: "#e8c4a0", e: "#1f140d", t: "#2a2a34", T: "#1f1f28", a: "#2a2a34", p: "#2a2a34", b: "#05030c", W: "#f4f4f4", V: "#5a1a2a", G: "#f2c36b" },
+    overlays: [[1, 3, "hhhhhhhh"], [2, 3, "hhhhhhhh"], [7, 6, "WW"], [8, 6, "VV"], [9, 6, "VV"], [11, 1, "G"], [11, 12, "G"]],
+  },
+  // the Arcade Regular: backwards-free gaming headset, purple cap, high-score tee
+  rika: {
+    pal: { h: "#2a1a3a", s: "#f1c27d", e: "#1f140d", t: "#3a1a50", T: "#2a1240", a: "#3a1a50", p: "#1a1a28", b: "#58e1ff", C: "#9b5de5", H: "#58e1ff", L: "#ff5fa8" },
+    overlays: [[0, 4, "CCCCCC"], [1, 3, "CCCCCCCC"], [2, 10, "CC"], [3, 2, "H"], [4, 2, "H"], [3, 11, "H"], [4, 11, "H"], [5, 2, "H"], [9, 5, "LLLL"]],
+  },
+  // the Casual Visitor: denim jacket, curly hair, tote bag
+  dee: {
+    pal: { h: "#4a2a1a", s: "#7a4a2a", e: "#1f140d", t: "#4a6a9a", T: "#3a5a8a", a: "#4a6a9a", p: "#d8c8a8", b: "#8a5a3a", Q: "#f4e4c1" },
+    overlays: [[0, 3, "hhhhhhhh"], [1, 2, "hhhhhhhhhh"], [3, 2, "h"], [3, 11, "h"], [4, 2, "h"], [4, 11, "h"], [11, 12, "Q"], [12, 12, "Q"], [13, 11, "QQ"]],
+  },
+  // sports fans on the lounge couches (we mostly see the backs of their heads and their team scarves)
+  marco: {
+    pal: { h: "#1a1210", s: "#e8b890", e: "#1f140d", t: "#d9304a", T: "#b02030", a: "#d9304a", p: "#2a3a5a", b: "#1a1a1a", W: "#fff6e0" },
+    overlays: [[7, 3, "WWWWWWWW"], [8, 3, "W"]],
+  },
+  lena: {
+    pal: { h: "#e8c060", s: "#f6d8b8", e: "#1f140d", t: "#3a8bff", T: "#2a6bdf", a: "#3a8bff", p: "#2a2a34", b: "#f4f4f4", Y: "#f2c36b" },
+    overlays: [...[3, 4, 5, 6, 7, 8].flatMap((r): Overlay[] => [[r, 2, "h"], [r, 11, "h"]]), [7, 3, "YYYYYYYY"]],
+  },
+  // the dance fan by the Beat Battle floor: neon tracksuit
+  jojo: {
+    pal: { h: "#05030c", s: "#5a3a2a", e: "#f6f1e6", t: "#ff5fa8", T: "#d8408a", a: "#58e1ff", p: "#ff5fa8", b: "#fff6e0", S: "#58e1ff" },
+    overlays: [[0, 4, "hhhhhh"], [0, 3, "h"], [0, 10, "h"], ...[14, 15, 16, 17, 18, 19, 20, 21].map((r): Overlay => [r, 3, "S"])],
+  },
+} satisfies Record<string, NpcLook>);
+
+/** The same NPC seen from behind (watching the big screen): the face becomes the back of the head. */
+export function renderNpcBackPixels(look: NpcLook): string[] {
+  const back: NpcLook = {
+    pal: look.pal,
+    overlays: [...look.overlays.filter(([r]) => r > 7 || r < 3 || look.pal.C !== undefined), [3, 3, "hhhhhhhh"], [4, 3, "hhhhhhhh"], [5, 3, "hhhhhhhh"], [6, 4, "ssssss"]],
+  };
+  // hats and turbans stay (they are seen from behind too); everything on the face is replaced by hair
+  return renderNpcPixels(back);
+}
+
 /** 32x32 grid of "#rrggbb" or "" (transparent), feet on the bottom row. */
 export function renderNpcPixels(look: NpcLook): string[] {
   const grid: string[][] = BASE.map((row) => row.split(""));

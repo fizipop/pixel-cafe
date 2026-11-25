@@ -7,7 +7,7 @@ import {
 } from "../shared/arcade.ts";
 import { arcadeStep, arcadeStepSeconds, ARCADE_BPM } from "../lib/arcadeMusic.ts";
 import { FLOOR2_X, FLOOR3_X, FLOOR_NAMES, STAIRS, clampToFloor, floorOfSeat, floorOfX } from "../shared/floors.ts";
-import { MACHINES, arcadeSeatInfo, arcadeSeats, BLACKJACK, POKER, POOL_TABLE, ROULETTE } from "./arcadeLayout.ts";
+import { ARCADE_H, MACHINES, arcadeSeatInfo, arcadeSeats, tableSeatList, BLACKJACK, POKER, POOL_TABLE, ROULETTE } from "./arcadeLayout.ts";
 import { WALL_H, WORLD_H, WORLD_W, TILE } from "./constants.ts";
 
 test("bets: whole beans between the table limits only", () => {
@@ -146,19 +146,20 @@ test("floors: names, coordinates and elevators", () => {
 
 test("arcade layout: machines, seats and elevators sit inside the room and don't overlap", () => {
   const x0 = FLOOR2_X;
-  const inside = (x: number, y: number) => x > x0 + TILE && x < x0 + WORLD_W - TILE && y > WALL_H && y < WORLD_H - TILE;
+  const inside = (x: number, y: number) => x > x0 + TILE && x < x0 + WORLD_W - TILE && y > WALL_H && y < ARCADE_H - TILE;
   const games = MACHINES.filter((m) => m.game).map((m) => m.game);
-  for (const g of ["slots", "mines", "moon", "penguin", "board", "fighter", "racer", "beat"]) assert.ok(games.includes(g as never), g);
+  for (const g of ["slots", "mines", "moon", "penguin", "board", "fighter", "beat", "plinko", "huff", "huffBonus", "lottery"]) assert.ok(games.includes(g as never), g);
   for (const m of MACHINES) {
     assert.ok(inside(m.spot.x, m.spot.y), `${m.id} spot`);
     assert.ok(m.solid.x >= x0 && m.solid.x + m.solid.w <= x0 + WORLD_W, m.id);
   }
   const seats = arcadeSeats();
-  assert.equal(seats.length, BLACKJACK.seats + ROULETTE.seats + POKER.seats + POOL_TABLE.seats);
+  assert.equal(tableSeatList().length, BLACKJACK.seats + ROULETTE.seats + POKER.seats + POOL_TABLE.seats);
   assert.equal(new Set(seats.map((s) => s.id)).size, seats.length);
   for (const s of seats) {
     assert.ok(inside(s.exit.x, s.exit.y), `${s.id} exit`);
-    assert.ok(arcadeSeatInfo(s.id));
+    if (tableSeatList().some((t) => t.id === s.id)) assert.ok(arcadeSeatInfo(s.id));
+    else assert.equal(arcadeSeatInfo(s.id), null, "rig and lounge seats don't open a table");
     assert.equal(floorOfSeat(s.id), 2);
   }
   assert.deepEqual(arcadeSeatInfo("f2-bj0-3"), { table: "bj0", index: 2 });

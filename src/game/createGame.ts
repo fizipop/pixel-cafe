@@ -17,6 +17,8 @@ export type CafeHandle = {
   travel: (floor: Floor) => void;
   /** Stand up from the table you are sitting at (used by the blackjack / roulette windows). */
   standUp: () => void;
+  /** An announcer line went out: arcade NPCs near the player react to it. */
+  crowdReact: (mood: "jackpot" | "big" | "win" | "lose" | "neutral") => void;
   destroy: () => void;
 };
 
@@ -49,7 +51,7 @@ export function createCafeGame(
   let destroyed = false;
   const scene = () => (destroyed ? null : (game.scene.getScene("Cafe") as CafeScene | null));
 
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" || process.env.NEXT_PUBLIC_EXPOSE_GAME === "1") { // opt-in for automated visual checks of a production build
     (window as unknown as { __cafe?: Phaser.Game }).__cafe = game; // handy for debugging
   }
 
@@ -60,6 +62,7 @@ export function createCafeGame(
     talkToBarista: () => scene()?.talkToBarista(),
     travel: (floor) => void scene()?.travel(floor),
     standUp: () => scene()?.standUpFromHud(),
+    crowdReact: (mood) => scene()?.crowdReact(mood),
     destroy: () => {
       if (destroyed) return;
       destroyed = true;

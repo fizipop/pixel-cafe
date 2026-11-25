@@ -2,7 +2,7 @@
 // and oil that only fire on real overlap) and lower cloth friction for 8-Ball Pool.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { RACE, confine, newRace, positions, roadFrame, stepRace, track, touchHazards, type Car, type Race, type RaceInput } from "../shared/racer.ts";
+import { RACE, carContact, confine, newRace, positions, roadFrame, stepRace, track, touchHazards, type Car, type Race, type RaceInput } from "../shared/racer.ts";
 import { POCKETS, POOL, PoolSim, newPoolGame, playShot, rackBalls, type PoolBall } from "../shared/pool.ts";
 import { mulberry32 } from "../shared/arcade.ts";
 
@@ -175,8 +175,52 @@ test("racer: rivals deflect each other and a shove can't push a car through the 
   b.vx += tr.nx[i] * 260; b.vy += tr.ny[i] * 260; // b swerves into a, which is against the wall
   run(r, 300, () => ({ ...idle, up: true }));
   assert.ok(breach(a) < 0.5 && breach(b) < 0.5, "neither car ends up inside the wall");
-  assert.ok(Math.hypot(a.x - b.x, a.y - b.y) >= RACE.CAR_R * 2 - 1, "they are pushed apart");
+  const hit = carContact(a, b);
+  assert.ok(!hit || hit.depth <= RACE.CAR_GAP + 0.05, "they are pushed apart: the two bodies do not overlap");
   void confine;
+});
+
+/** How deep two car bodies interpenetrate (0 = apart or merely touching across the CAR_GAP clearance). */
+const overlap = (a: Car, b: Car) => { const h = carContact(a, b); return h ? Math.max(0, h.depth - RACE.CAR_GAP) : 0; };
+
+test("racer contact: cars collide as boxes, so a rear-ender meets bumper to bumper and side-by-side cars meet door to door", () => {
+  const tr = track(), r = newRace(2);
+  afterStart(r);
+  const [a, b] = [r.cars[0], r.cars[1]];
+  const i = 60, ang = Math.atan2(tr.ty[i], tr.tx[i]);
+  for (const c of r.cars.slice(2)) { c.x = -9999; c.y = -9999; c.finishedAt = 0; }
+  const place = (c: Car, lat: number, along: number) => { c.idx = i; c.x = tr.pts[i].x + tr.nx[i] * lat + tr.tx[i] * along; c.y = tr.pts[i].y + tr.ny[i] * lat + tr.ty[i] * along; c.angle = ang; c.vx = c.vy = 0; };
+  // nose to tail: 24 px apart is 2 px of overlap for two 26 px cars (the old 22 px circles let them sit 4 px inside each other)
+  place(a, 0, 0); place(b, 0, RACE.CAR_HL * 2 - 2);
+  const h1 = carContact(a, b);
+  assert.ok(h1 && Math.abs(h1.nx * tr.tx[i] + h1.ny * tr.ty[i]) > 0.99, "pushed apart along the road (bumpers)");
+  // side by side, 15 px apart: the 14 px wide bodies are clear of each other, so no phantom contact
+  place(b, RACE.CAR_HW * 2 + 1, 0);
+  assert.equal(carContact(a, b), null, "no contact between cars that are not touching");
+  place(b, RACE.CAR_HW * 2 - 2, 0);
+  const h2 = carContact(a, b);
+  assert.ok(h2 && Math.abs(h2.nx * tr.nx[i] + h2.ny * tr.ny[i]) > 0.99, "pushed apart sideways (doors)");
+  // a fast rear-ender: the chaser is stopped at the bumper and passes its speed on
+  place(a, 0, 0); place(b, 0, RACE.CAR_HL * 2 + 6);
+  a.vx = tr.tx[i] * 300; a.vy = tr.ty[i] * 300;
+  let worst = 0;
+  run(r, 400, () => idle, () => { worst = Math.max(worst, overlap(a, b)); });
+  assert.ok(worst < 0.5, `never more than a sliver inside each other (${worst.toFixed(2)} px)`);
+  assert.ok(b.vx * tr.tx[i] + b.vy * tr.ty[i] > 60, "the car in front was shunted forward");
+});
+
+test("racer contact: across whole chaotic races the field never piles up inside itself", () => {
+  for (const seed of [3, 17]) {
+    const r = newRace(seed), pick = mulberry32(seed * 5 + 3);
+    let held: RaceInput = idle, worst = 0;
+    run(r, 60000, (t) => {
+      if (Math.floor(t / 400) !== Math.floor((t - STEP) / 400)) held = { up: pick() < 0.9, down: pick() < 0.08, left: pick() < 0.4, right: pick() < 0.4, drift: pick() < 0.3 };
+      return held;
+    }, (rr) => {
+      for (let i = 0; i < rr.cars.length; i++) for (let j = i + 1; j < rr.cars.length; j++) worst = Math.max(worst, overlap(rr.cars[i], rr.cars[j]));
+    });
+    assert.ok(worst < 1.5, `seed ${seed}: deepest body overlap ${worst.toFixed(2)} px`);
+  }
 });
 
 // ------------------------------------------------------------------ 8-Ball Pool friction

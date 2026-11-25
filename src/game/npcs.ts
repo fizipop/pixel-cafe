@@ -5,11 +5,29 @@ import { privateTableOf, type Seat } from "./layout";
 import type { Bubbles } from "./bubbles";
 import { HeldCup, type DrinkKind } from "./heldCup";
 
+export type CrowdMood = "jackpot" | "big" | "win" | "lose";
+export type Waypoint = Point & { face?: -1 | 1 };
+
 export type NpcSpec = {
   id: string;
   name: string;
   tag: string; // shown as [Tag] before the name
-  behavior: "barista" | "sitter" | "walker";
+  /** barista / sitter / walker (Floor 1, original), stander (keeps to one spot), wanderer (visits waypoints in turn) */
+  behavior: "barista" | "sitter" | "walker" | "stander" | "wanderer";
+  /** Which floor they live on (default 1). Floor 2 NPCs use the Arcade's own path-finding grid. */
+  floor?: 1 | 2;
+  /** Said once when the player walks up to them (then not again for a while). */
+  greet?: string[];
+  /** What they say when the announcer calls a result nearby. */
+  react?: Partial<Record<CrowdMood, string[]>>;
+  /** Wanderers walk between these (and face `face` while they linger). */
+  waypoints?: Waypoint[];
+  /** Idle animation: a gentle bob, typing at a laptop, hyped bouncing, hand gestures (side to side), looking around. */
+  idle?: "bob" | "type" | "hype" | "gesture" | "look";
+  /** Seen from behind (sits facing away from us, e.g. watching the big screen). */
+  back?: boolean;
+  /** Standers face this way (-1 left, 1 right). */
+  face?: -1 | 1;
   home: Point; // feet position (barista, walker). Sitters start in their seat.
   seatId?: string;
   lines: string[]; // what they say when you talk to them (cycles)
@@ -85,7 +103,17 @@ export type NpcWorld = {
   nav: NavGrid;
   playerPos: () => Point;
   onClick: (npc: Npc) => void;
+  /** Other NPCs sharing the floor, so walkers wait instead of passing through each other. */
+  others?: () => Npc[];
 };
+
+const GENERIC_REACT: Record<CrowdMood, string[]> = {
+  jackpot: ["WHOA! Jackpot!", "No way! Did you see that?!", "Somebody's buying the lattes!"],
+  big: ["Big win! Nice!", "Ooh, that's a good one.", "Look at those beans!"],
+  win: ["Nice one!", "Ayy, a winner!", "Not bad!"],
+  lose: ["Oof. Next time.", "Ah, so close.", "The machine giveth, the machine taketh."],
+};
+const GREET_RANGE = 46;
 
 const MACHINE_SPOT = 140; // where the barista stands to pull espresso
 const WIPE_MIN = 165;
@@ -122,6 +150,14 @@ export class Npc {
   // walker state
   private wState: "counter" | "toSeat" | "sit" | "back" = "counter";
   private wTimer = 0;
+  // wanderer / stander state
+  private vState: "linger" | "walk" = "linger";
+  private vTimer = 0;
+  private vAt = -1;
+  private greetAt = 0;
+  private wasNear = false;
+  private hypeUntil = 0;
+  private faceOverride: { dir: -1 | 1; until: number } | null = null;
 
   constructor(spec: NpcSpec, world: NpcWorld) {
     this.spec = spec;
@@ -132,7 +168,7 @@ export class Npc {
     const scene = world.scene;
 
     this.shadow = scene.add.image(this.x, this.y, "shadow");
-    this.sprite = scene.add.image(this.x, this.y, `npc_${spec.id}`).setOrigin(0.5, 1);
+    this.sprite = scene.add.image(this.x, this.y, `npc_${spec.id}${spec.back ? "_back" : ""}`).setOrigin(0.5, 1);
     this.sprite.setInteractive({ useHandCursor: true });
     this.sprite.on("pointerdown", () => world.onClick(this));
     this.label = scene.add
@@ -160,6 +196,32 @@ export class Npc {
       this.wipeX = rand(WIPE_MIN, WIPE_MAX);
     }
     if (spec.behavior === "walker") this.wTimer = rand(2500, 4500);
+    if (spec.behavior === "wanderer") { this.vTimer = rand(1500, 6000); this.vAt = 0; }
+    if (spec.behavior === "stander" && spec.face) this.sprite.setFlipX(spec.face < 0);
+  }
+
+  /** The announcer called a result near this NPC: say something fitting (and bounce for a big one). */
+  react(mood: CrowdMood) {
+    const now = this.w.scene.time.now;
+    if (now < this.busyUntil) return;
+    const lines = this.spec.react?.[mood] ?? GENERIC_REACT[mood];
+    this.say(pick(lines), 3000);
+    this.busyUntil = now + 3000;
+    if (mood === "jackpot" || mood === "big") this.hypeUntil = now + 2200;
+    const p = this.w.playerPos();
+    this.faceOverride = { dir: p.x < this.x ? -1 : 1, until: now + 4000 };
+  }
+
+  /** Keep quiet (no idle chatter or greetings) for `ms`: used while a scripted conversation is playing. */
+  hold(ms: number) {
+    const until = this.w.scene.time.now + ms;
+    this.busyUntil = Math.max(this.busyUntil, until);
+    this.nextAmbient = Math.max(this.nextAmbient, until + 2000);
+  }
+
+  /** Turn toward a point for a while (crew members turn to whoever is talking). */
+  lookAt(x: number, ms = 3500) {
+    this.faceOverride = { dir: x < this.x ? -1 : 1, until: this.w.scene.time.now + ms };
   }
 
   /** A short name for what the NPC is doing (useful in tests). */
@@ -198,6 +260,20 @@ export class Npc {
 
   say(text: string, ms = 3600) {
     this.w.bubbles.say(this.id, () => this.headAnchor(), text, ms);
+  }
+
+  /** Pixel offset for the idle animation right now ({0,0} = still). Each NPC is phase-shifted by its id. */
+  private idleOffset(time: number): { x: number; y: number } {
+    const ph = time + (this.id.length * 977 + this.id.charCodeAt(4) * 131);
+    if (time < this.hypeUntil) return { x: 0, y: Math.round(Math.abs(Math.sin(ph / 90)) * 3) };
+    switch (this.spec.idle) {
+      case "hype": return { x: 0, y: Math.sin(ph / 160) > 0.6 ? 2 : 0 };
+      case "type": return { x: 0, y: Math.sin(ph / 70) > 0.75 && Math.sin(ph / 1300) > 0 ? 1 : 0 };
+      case "gesture": return { x: Math.sin(ph / 900) > 0.85 ? 1 : 0, y: Math.sin(ph / 400) > 0.9 ? 1 : 0 };
+      case "look": if (this.mode === "stand" && Math.floor(ph / 2600) % 3 === 0 && !this.faceOverride) this.sprite.setFlipX(Math.floor(ph / 1300) % 2 === 0); return { x: 0, y: 0 };
+      case "bob": return { x: 0, y: Math.sin(ph / 600) > 0.5 ? 1 : 0 };
+      default: return { x: 0, y: 0 };
+    }
   }
 
   private headAnchor() {
@@ -253,9 +329,11 @@ export class Npc {
     const dist = Math.hypot(dx, dy);
     const step = (speed * dtMs) / 1000;
     if (dist > 0.001) {
-      // wait politely if the player is standing right in front of us
+      // wait politely if the player (or another NPC) is standing right in front of us
       const p = this.w.playerPos();
-      if (Math.hypot(p.x - (this.x + (dx / dist) * 14), p.y - (this.y + (dy / dist) * 14)) < 12) return false;
+      const ax = this.x + (dx / dist) * 14, ay = this.y + (dy / dist) * 14;
+      if (Math.hypot(p.x - ax, p.y - ay) < 12) return false;
+      for (const o of this.w.others?.() ?? []) if (o !== this && o.mode !== "sit" && Math.hypot(o.x - ax, o.y - ay) < 11) { if (this.yieldTo(o)) return false; }
     }
     if (dist <= step) {
       this.x = t.x;
@@ -268,6 +346,9 @@ export class Npc {
     if (Math.abs(dx) > 0.5) this.sprite.setFlipX(dx < 0);
     return this.path.length === 0;
   }
+
+  /** Two NPCs face to face: the one with the "smaller" id waits, the other walks on (so they never deadlock). */
+  private yieldTo(o: Npc) { return o.mode !== "walk" || this.id > o.id; }
 
   private startPath(to: Point): boolean {
     const path = this.w.nav.findPath({ x: this.x, y: this.y }, to);
@@ -404,11 +485,59 @@ export class Npc {
     }
   }
 
+  // ------------------------------------------------------------- wanderer
+
+  /** Linger at a waypoint (facing what is there), then walk to another one. Paths come from the floor's nav grid. */
+  private updateWanderer(time: number, dt: number) {
+    const pts = this.spec.waypoints ?? [];
+    if (!pts.length) return;
+    if (this.vState === "linger") {
+      this.mode = "stand";
+      this.vTimer -= dt;
+      if (this.vTimer <= 0 && time >= this.busyUntil) {
+        for (let tries = 0; tries < 4; tries++) {
+          let next = Math.floor(Math.random() * pts.length);
+          if (next === this.vAt) next = (next + 1) % pts.length;
+          if (this.startPath(pts[next])) { this.vAt = next; this.vState = "walk"; return; }
+        }
+        this.vTimer = rand(2000, 4000); // nowhere reachable right now: try again shortly
+      }
+    } else {
+      if (time < this.busyUntil) return;
+      if (this.follow(dt, 48)) {
+        this.mode = "stand";
+        this.vState = "linger";
+        this.vTimer = rand(6000, 14000);
+        const f = pts[this.vAt]?.face;
+        if (f) this.sprite.setFlipX(f < 0);
+      }
+    }
+  }
+
   // ----------------------------------------------------------------- tick
 
   update(time: number, dt: number) {
     if (this.spec.behavior === "barista") this.updateBarista(time, dt);
     else if (this.spec.behavior === "walker") this.updateWalker(time, dt);
+    else if (this.spec.behavior === "wanderer") this.updateWanderer(time, dt);
+
+    // the player walks up: a hello (once in a while), and they turn to face you
+    const p = this.w.playerPos();
+    const near = Math.hypot(p.x - this.x, p.y - this.y) < GREET_RANGE;
+    if (near && !this.wasNear && time >= this.greetAt && time >= this.busyUntil && this.mode !== "walk") {
+      this.greetAt = time + 25_000;
+      this.lookAt(p.x, 4000);
+      if (this.spec.greet?.length) { this.say(pick(this.spec.greet), 2800); this.busyUntil = time + 2800; }
+      else this.w.bubbles.emote(this.id, () => this.headAnchor(), "emote_wave", 1800);
+    }
+    this.wasNear = near;
+    if (this.faceOverride) {
+      if (time > this.faceOverride.until) {
+        this.faceOverride = null;
+        if (this.seat) this.sprite.setFlipX(this.seat.flipX);
+        else if (this.spec.behavior === "stander" && this.spec.face) this.sprite.setFlipX(this.spec.face < 0);
+      } else if (this.mode !== "walk") this.sprite.setFlipX(this.faceOverride.dir < 0);
+    }
 
     if (time >= this.nextAmbient && time >= this.busyUntil) {
       this.nextAmbient = time + rand(9000, 16000);
@@ -418,14 +547,22 @@ export class Npc {
       else if (ambientEmote) this.w.bubbles.emote(this.id, () => this.headAnchor(), pick(ambientEmote), 2600);
     }
 
-    // draw
+    // draw (idle animations are small pixel offsets, so they cost nothing)
+    const idle = this.idleOffset(time);
     if (this.mode !== "sit") {
-      const hop = this.mode === "walk" ? Math.round(Math.abs(Math.sin(time / 110)) * 2) : 0;
+      const hop = this.mode === "walk" ? Math.round(Math.abs(Math.sin(time / 110)) * 2) : idle.y;
       const shake = this.bState === "brew" && this.spec.behavior === "barista" ? Math.round(Math.sin(time / 35)) : 0;
-      this.sprite.setPosition(Math.round(this.x) + shake, Math.round(this.y) - hop).setDepth(this.y);
+      this.sprite.setPosition(Math.round(this.x) + shake + (this.mode === "walk" ? 0 : idle.x), Math.round(this.y) - hop).setDepth(this.y);
       this.shadow.setPosition(Math.round(this.x), Math.round(this.y) - 2).setDepth(this.y - 1);
+    } else if (this.seat && idle.y) {
+      this.sprite.setY(this.seat.y + sitPose(32 - ART_TOP, 31).lift + (idle.y > 0 ? 1 : 0)); // typing / shuffling in the seat
+    } else if (this.seat) {
+      this.sprite.setY(this.seat.y + sitPose(32 - ART_TOP, 31).lift);
     }
-    this.label.setPosition(Math.round(this.sprite.x), Math.round(this.sprite.y) - ART_TOP - 4).setDepth(80000);
+    // only label NPCs near the player, so a busy floor doesn't drown in name tags
+    const labelOn = Math.hypot(p.x - this.x, p.y - this.y) < 150;
+    this.label.setVisible(labelOn);
+    if (labelOn) this.label.setPosition(Math.round(this.sprite.x), Math.round(this.sprite.y) - ART_TOP - 4).setDepth(80000);
     this.cup.follow(this.sprite.x + (this.sprite.flipX ? -8 : 8), this.sprite.y - 13, this.sprite.depth + 1, time);
   }
 }

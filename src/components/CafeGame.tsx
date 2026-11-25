@@ -16,6 +16,7 @@ import ArcadeHost from "./arcade/ArcadeHost";
 import RooftopHost from "./rooftop/RooftopHost";
 import FloorPicker from "./FloorPicker";
 import { Sfx, type SfxName } from "@/lib/sfx";
+import { Announcer, moodOf, type AnnounceLine } from "@/lib/announcer";
 import { moodName } from "@/lib/moods";
 import { addBeans, loadProfile } from "@/lib/profile";
 import { PLAYER_ID } from "@/game/constants";
@@ -36,14 +37,14 @@ const AUDIO_KEY = "pixelcafe.audio.v1";
 
 type Modal = null | "board" | "order" | "jukebox" | "guestbook" | "game" | "outfits" | "floors";
 
-function loadAudioPrefs(): { volume: number; muted: boolean; sfx: boolean } {
+function loadAudioPrefs(): { volume: number; muted: boolean; sfx: boolean; voice: boolean } {
   try {
     const p = JSON.parse(localStorage.getItem(AUDIO_KEY) ?? "null");
     if (p && typeof p.volume === "number" && typeof p.muted === "boolean") {
-      return { volume: p.volume, muted: p.muted, sfx: p.sfx !== false };
+      return { volume: p.volume, muted: p.muted, sfx: p.sfx !== false, voice: p.voice !== false };
     }
   } catch { /* ignore */ }
-  return { volume: 0.5, muted: false, sfx: true };
+  return { volume: 0.5, muted: false, sfx: true, voice: true };
 }
 
 /** "3 in cafe" while connected; says so when the server isn't there. */
@@ -71,6 +72,7 @@ export default function CafeGame() {
   const [muted, setMuted] = useState(false);
   const [modal, setModal] = useState<Modal>(null);
   const [sfxOn, setSfxOn] = useState(true);
+  const [voiceOn, setVoiceOn] = useState(true);
   const [beans, setBeans] = useState(0);
   // Shared cafe state (jukebox mood, weather, table game). Online, the server owns it (see src/net).
   const [world] = useState(() => new WorldStore(newWorld()));
@@ -88,11 +90,13 @@ export default function CafeGame() {
   const netRef = useRef<NetClient | null>(null);
   const musicRef = useRef<LofiPlayer | null>(null);
   const sfxRef = useRef<Sfx | null>(null);
+  const announcerRef = useRef<Announcer | null>(null);
   const arcadeMusicRef = useRef<ArcadeMusic | null>(null);
   const rooftopMusicRef = useRef<RooftopMusic | null>(null);
   const initialRef = useRef<{ username: string; pixels: string[] } | null>(null);
   const closeModal = useCallback(() => setModal(null), []);
   const playSfx = useCallback((n: SfxName) => sfxRef.current?.play(n), []);
+  const announce = useCallback((line: AnnounceLine) => announcerRef.current?.say(line), []);
 
   // Which floor you are on, your server-side Cafe Beans and the daily top-up notice all come from the NetClient.
   const floor: Floor = useSyncExternalStore(net ? net.subscribe : noopSubscribe, () => (net && !net.closed ? net.floor : 1), () => 1);
@@ -129,6 +133,7 @@ export default function CafeGame() {
       setVolume(prefs.volume);
       setMuted(prefs.muted);
       setSfxOn(prefs.sfx);
+      setVoiceOn(prefs.voice);
       setBeans(loadProfile().beans);
       const wp = loadWorldPrefs();
       world.load({ ...world.getState(), mood: wp.mood, weather: wp.weather });
@@ -194,13 +199,19 @@ export default function CafeGame() {
     sfxRef.current?.setVolume(volume);
     sfxRef.current?.setMuted(muted);
     sfxRef.current?.setEnabled(sfxOn);
+    announcerRef.current?.setVolume(volume);
+    announcerRef.current?.setMuted(muted); // the global mute silences the announcer too
+    announcerRef.current?.setEnabled(voiceOn);
     arcadeMusicRef.current?.setVolume(volume);
     arcadeMusicRef.current?.setMuted(muted);
     rooftopMusicRef.current?.setVolume(volume);
     rooftopMusicRef.current?.setMuted(muted);
     if (!loaded) return;
-    try { localStorage.setItem(AUDIO_KEY, JSON.stringify({ volume, muted, sfx: sfxOn })); } catch { /* ignore */ }
-  }, [volume, muted, sfxOn, loaded]);
+    try { localStorage.setItem(AUDIO_KEY, JSON.stringify({ volume, muted, sfx: sfxOn, voice: voiceOn })); } catch { /* ignore */ }
+  }, [volume, muted, sfxOn, voiceOn, loaded]);
+
+  // closing a game window (or leaving Floor 2) cuts off whatever the announcer was saying
+  useEffect(() => { if (arcade === null) announcerRef.current?.stop(); }, [arcade]);
 
   // Jukebox mood + window weather drive the music engine (and are remembered on this device).
   useEffect(() => {
@@ -218,7 +229,7 @@ export default function CafeGame() {
   }, [floor, entered, arcade]);
 
   // Stop the audio if the player leaves the page.
-  useEffect(() => () => { musicRef.current?.stop(); sfxRef.current?.stop(); arcadeMusicRef.current?.stop(); rooftopMusicRef.current?.stop(); }, []);
+  useEffect(() => () => { musicRef.current?.stop(); sfxRef.current?.stop(); announcerRef.current?.stop(); arcadeMusicRef.current?.stop(); rooftopMusicRef.current?.stop(); }, []);
 
   const selected = chars.find((c) => c.id === selectedId);
 
@@ -241,6 +252,13 @@ export default function CafeGame() {
     sfx.setMuted(muted);
     sfx.setEnabled(sfxOn);
     sfx.start();
+    const ann = (announcerRef.current ??= new Announcer((big) => sfxRef.current?.play(big ? "stingerBig" : "stinger")));
+    ann.setVolume(volume);
+    ann.setMuted(muted);
+    ann.setEnabled(voiceOn);
+    ann.start();
+    // the arcade crowd hears the announcer too: nearby NPCs cheer a jackpot or groan at a loss
+    ann.subscribe((line) => handleRef.current?.crowdReact(moodOf(line)));
     const arc = (arcadeMusicRef.current ??= new ArcadeMusic());
     arc.setVolume(volume);
     arc.setMuted(muted);
@@ -363,6 +381,14 @@ export default function CafeGame() {
         >
           {sfxOn ? "SFX on" : "SFX off"}
         </button>
+        <button
+          className={`px-btn secondary ${voiceOn ? "active" : ""}`}
+          onClick={(e) => { setVoiceOn((v) => !v); e.currentTarget.blur(); }}
+          aria-pressed={voiceOn}
+          title="Toggle the arcade announcer voice"
+        >
+          {voiceOn ? "Voice on" : "Voice off"}
+        </button>
         <span className="hidden text-latte md:inline" title="Change it at the jukebox">♪ {moodName(wstate.mood)}</span>
         <OnlineBadge net={net} connecting={connecting} />
       </div>
@@ -402,6 +428,7 @@ export default function CafeGame() {
           net={net}
           onClose={() => setArcade(null)}
           sfx={playSfx}
+          announce={announce}
           onStand={() => { handleRef.current?.standUp(); setArcade(null); }}
         />
       )}

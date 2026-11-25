@@ -22,8 +22,11 @@ import { buildArcadeFloor } from "./arcadeFloor";
 import { buildRooftopTextures } from "./rooftopArt";
 import { buildRooftopFloor } from "./rooftopFloor";
 import { PHOTO_STAND, POLAROID_WALL, TELESCOPE, isFireSeat, type RooftopGame } from "./rooftopLayout";
-import { MACHINES, ROULETTE_WATCH, TABLE_GAME, TABLE_NAME, arcadeSeatInfo, type ArcadeGame, type Machine } from "./arcadeLayout";
-import { STAIRS, WORLD_TOTAL_W, floorBounds, type Floor } from "@/shared/floors";
+import { ARCADE_H, MACHINES, ROULETTE_WATCH, TABLE_GAME, TABLE_NAME, arcadeSeatInfo, arcadeSolids, arcadeWalls, isRigSeat, type ArcadeGame, type Machine } from "./arcadeLayout";
+import { STAIRS, WORLD_TOTAL_H, WORLD_TOTAL_W, floorBounds, type Floor } from "@/shared/floors";
+import { buildCasinoTextures } from "./casinoArt";
+import { ARCADE_CROWD, CREW, CREW_TALKS, crewTablePos } from "./crowd";
+import type { CrowdMood } from "./npcs";
 import { WeatherLayer } from "./weather";
 import { Cat } from "./cat";
 import { reactionFor } from "./gifts";
@@ -148,11 +151,12 @@ export class CafeScene extends Phaser.Scene {
     buildSpriteTextures(this);
     buildPropTextures(this);
     buildArcadeTextures(this);
+    buildCasinoTextures(this);
     buildRooftopTextures(this);
     this.world = this.registry.get("world") as WorldStore;
     this.net = (this.registry.get("net") as NetClient | null | undefined) ?? null;
     if (this.net) this.selfOcc = this.net.occupant;
-    this.physics.world.setBounds(0, 0, WORLD_TOTAL_W, WORLD_H); // all three floors live side by side
+    this.physics.world.setBounds(0, 0, WORLD_TOTAL_W, WORLD_TOTAL_H); // all three floors live side by side (Floor 2 is the tallest)
     this.add.image(0, 0, "bg").setOrigin(0).setDepth(0);
     this.add.image(BOARD.x, BOARD.y, "board").setOrigin(0).setDepth(2);
 
@@ -299,6 +303,7 @@ export class CafeScene extends Phaser.Scene {
       this.solid(x + 6, y + 22, 52, 28);
       this.lamp(x + 32, y);
       if (i === 3) this.place("laptop", x + 24, y + 12).setDepth(y + 57); // Kai's laptop (lid faces us)
+      if (i === 5) this.crewProps(x, y); // the Pixel Restaurant crew's table
       if (i === GAME_TABLE) this.place("book", x + 8, y + 15).setDepth(y + 57); // Theo's book (he also plays tic-tac-toe)
     });
 
@@ -368,6 +373,17 @@ export class CafeScene extends Phaser.Scene {
     buildRooftopFloor(floorBuilder);
   }
 
+  /** Four laptops (one per crew member, facing them) and a little Pixel Restaurant table tent, plus a subtle sign. */
+  private crewProps(x: number, y: number) {
+    this.place("laptop", x + 24, y + 10).setDepth(y + 57); // Faizan's (top seat): we see the lid
+    this.place("laptop_screen", x + 24, y + 30).setDepth(y + 58); // Nick's (bottom seat): its screen faces us, the site is up
+    this.place("laptop_side", x + 6, y + 24).setDepth(y + 57); // Puneet's (left)
+    this.place("laptop_side", x + 52, y + 24, true).setDepth(y + 57); // Cris's (right)
+    this.place("tent_card", x + 40, y + 14).setDepth(y + 57);
+    this.add.text(x + 32, y - 18, "Pixel Restaurant HQ", { fontFamily: "VT323, monospace", fontSize: "12px", color: "#e8a070", stroke: "#1f140d", strokeThickness: 2 })
+      .setOrigin(0.5, 1).setResolution(3).setAlpha(0.8).setDepth(y + 2);
+  }
+
   private lamp(cx: number, tableY: number) {
     this.place("lamp", cx - 7, tableY - 70).setDepth(90000);
     this.glow(cx, tableY + 24, 1.5);
@@ -408,8 +424,57 @@ export class CafeScene extends Phaser.Scene {
       playerPos: () => ({ x: this.hitbox.x, y: this.hitbox.y }),
       onClick: (npc) => this.onNpcClick(npc),
     };
-    this.npcs = NPC_SPECS.map((spec) => new Npc(spec, world));
+    const floor1 = [...NPC_SPECS, ...CREW].map((spec) => new Npc(spec, world));
+    world.others = () => floor1;
+    // Floor 2 has its own path-finding grid built from the Arcade's furniture, so the crowd walks around machines,
+    // tables, rigs and couches instead of through them
+    const nav2 = new NavGrid(WORLD_TOTAL_W, ARCADE_H, [...arcadeSolids(STAIRS[2].solid), ...arcadeWalls()]);
+    const world2: NpcWorld = { ...world, nav: nav2 };
+    this.arcadeCrowd = ARCADE_CROWD.map((spec) => new Npc(spec, world2));
+    world2.others = () => this.arcadeCrowd;
+    this.npcs = [...floor1, ...this.arcadeCrowd];
     this.barista = this.npcs.find((n) => n.spec.id === "mina")!;
+    this.crew = this.npcs.filter((n) => CREW.some((c) => c.id === n.spec.id));
+    this.nextCrewTalk = this.time.now + 6000;
+  }
+
+  private arcadeCrowd: Npc[] = [];
+  private crew: Npc[] = [];
+  private nextCrewTalk = 0;
+  private crewTalkIdx = Math.floor(Math.random() * CREW_TALKS.length);
+
+  /** Every so often the crew talks shop: each line in turn, and the others turn to look at whoever is speaking. */
+  private updateCrewTalk(time: number) {
+    if (time < this.nextCrewTalk || this.crew.length < 4) return;
+    const p = { x: this.hitbox.x, y: this.hitbox.y };
+    const t = crewTablePos();
+    const talking = Math.hypot(p.x - (t.x + 32), p.y - (t.y + 30)) < 40; // the player is right there chatting: let them
+    this.nextCrewTalk = time + (talking ? 6000 : 14000 + Math.random() * 10000);
+    if (talking) return;
+    const script = CREW_TALKS[this.crewTalkIdx++ % CREW_TALKS.length];
+    for (const n of this.crew) n.hold(script.length * 2700 + 600); // no idle chatter over the conversation
+    script.forEach(([who, line], k) => {
+      this.time.delayedCall(k * 2700, () => {
+        const speaker = this.crew.find((n) => n.spec.id === who);
+        if (!speaker) return;
+        speaker.say(line, 2600); // (say() bypasses the hold: only idle chatter is held back)
+        for (const n of this.crew) if (n !== speaker) n.lookAt(speaker.x, 2700);
+      });
+    });
+    this.nextCrewTalk = Math.max(this.nextCrewTalk, time + script.length * 2700 + 4000);
+  }
+
+  /** The announcer called a result: arcade NPCs near the player react (Togi reacts to anything he can hear). */
+  crowdReact(mood: CrowdMood | "neutral") {
+    if (mood === "neutral" || this.floor !== 2) return;
+    const p = { x: this.hitbox.x, y: this.hitbox.y };
+    const near = this.arcadeCrowd
+      .map((n) => ({ n, d: Math.hypot(n.x - p.x, n.y - p.y) }))
+      .filter(({ n, d }) => d < (n.spec.id === "togi" ? 420 : 280))
+      .sort((a, b) => a.d - b.d);
+    const togi = near.find((q) => q.n.spec.id === "togi");
+    const pickd = [...(togi ? [togi] : []), ...near.filter((q) => q !== togi)].slice(0, mood === "jackpot" ? 3 : 2);
+    pickd.forEach(({ n }, k) => this.time.delayedCall(350 + k * 700, () => n.react(mood)));
   }
 
   // --------------------------------------------------------------- player
@@ -590,6 +655,8 @@ export class CafeScene extends Phaser.Scene {
     if (this.seated) {
       const arc = this.arcadeSeat();
       if (arc) return `Press E to open the ${TABLE_NAME[arc.table]} table\nMove to stand up`;
+      if (isRigSeat(this.seated.id)) return "Press E to race Neon Drift GP\nMove to climb out";
+      if (this.seated.id.startsWith("f2-ls-")) return "Watching the Pixel League\nPress E to stand";
       if (isFireSeat(this.seated.id)) return "Press E to roast a marshmallow\nMove to stand up";
       if (this.atGameTable()) return "Press E to play Tic-Tac-Toe\nMove to stand up";
       if (privateTableOf(this.seated.id)) return "Private Table: chat stays at this table\nPress E to stand";
@@ -600,6 +667,8 @@ export class CafeScene extends Phaser.Scene {
       case "seat": {
         const arc = arcadeSeatInfo(t.seat.id);
         if (arc) return `Press E to sit at the ${TABLE_NAME[arc.table]} table`;
+        if (isRigSeat(t.seat.id)) return "Press E to sit in the racing rig";
+        if (t.seat.id.startsWith("f2-ls-")) return "Press E to sit and watch the game";
         if (isFireSeat(t.seat.id)) return "Press E to sit by the campfire";
         if (t.seat.id.startsWith(GAME_SEAT_PREFIX)) return "Press E to sit and play Tic-Tac-Toe";
         return privateTableOf(t.seat.id) ? "Press E to join the Private Table (up to 6)" : "Press E to sit";
@@ -777,6 +846,7 @@ export class CafeScene extends Phaser.Scene {
     this.sfx("sit");
     const arc = arcadeSeatInfo(seat.id);
     if (arc) this.time.delayedCall(450, () => { if (this.seated?.id === seat.id) this.cb()?.onOpenArcade(TABLE_GAME[arc.table]); });
+    if (isRigSeat(seat.id)) this.time.delayedCall(450, () => { if (this.seated?.id === seat.id) this.cb()?.onOpenArcade("racer"); }); // buckle in, the race window opens
     if (seat.id.startsWith(GAME_SEAT_PREFIX)) {
       if (!this.net) this.world.dispatch({ type: "ttt", action: { type: "join", side: "X", by: this.selfOcc } }); // online: the server seats us
       this.time.delayedCall(450, () => { if (this.atGameTable()) this.cb()?.onOpenGame(); }); // the board comes to you
@@ -813,7 +883,9 @@ export class CafeScene extends Phaser.Scene {
 
   update(time: number, delta: number) {
     this.bubbles.update(time);
-    for (const npc of this.npcs) npc.update(time, delta);
+    // NPCs only think when the player is on their floor (a hidden floor costs nothing)
+    for (const npc of this.npcs) if ((npc.spec.floor ?? 1) === this.floor || npc.spec.behavior === "barista") npc.update(time, delta);
+    if (this.floor === 1) this.updateCrewTalk(time);
     this.cat.update(time, delta);
     this.weather.update(delta);
     for (const r of this.remotes.values()) r.update(time, delta);
@@ -836,6 +908,7 @@ export class CafeScene extends Phaser.Scene {
           const arc = this.arcadeSeat();
           if (isFireSeat(this.seated.id)) this.roofWindow("roast"); // E at the campfire: roast a marshmallow
           else if (arc) this.cb()?.onOpenArcade(TABLE_GAME[arc.table]); // E re-opens the table
+          else if (isRigSeat(this.seated.id)) this.cb()?.onOpenArcade("racer"); // E in the rig: race again
           else if (this.atGameTable()) this.cb()?.onOpenGame(); // E re-opens the board; walking away stands you up
           else this.standUp();
         }

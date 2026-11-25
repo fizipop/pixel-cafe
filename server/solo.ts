@@ -7,7 +7,8 @@ import {
 } from "../src/shared/arcade.ts";
 import { beansFor, chartFor, isDifficulty, songMsFor, rankOf, scoreRun, type Difficulty } from "../src/shared/beat.ts";
 import { RACE, raceBeans, track } from "../src/shared/racer.ts";
-import type { MinesView, PenguinView, RunFinish, SlotsResult } from "../src/shared/protocol.ts";
+import { LOTTERY, huffPlay, lotteryDraw, plinkoMult, plinkoRun, validGate, validLotteryNumber, type HuffMachine } from "../src/shared/casino.ts";
+import type { HuffResultMsg, LotteryResult, MinesView, PenguinView, PlinkoResult, RunFinish, SlotsResult } from "../src/shared/protocol.ts";
 import { fail, type EngineCtx, type Fail, type Who } from "./arcadeTypes.ts";
 import { LOWER_IS_BETTER, type BoardId, type Repository } from "./repository.ts";
 import { FreeRewards } from "./rewards.ts";
@@ -42,6 +43,45 @@ export class SoloGames {
     if (win > 0) this.ctx.wallets.credit(w.clientId, win);
     this.ctx.touch(w.clientId);
     return { ok: true, reels, mult, win, beans: this.ctx.wallets.balance(w.clientId) };
+  }
+
+  // ------------------------------------------------------------ plinko, huff & xtra puff, lottery
+  // Each one is settled in this single call: the stake is taken, the result is rolled here, and the payout (if any) is
+  // credited once before the reply goes out. The browser only animates the reply, so nothing it does afterwards (a
+  // second click, an animation callback firing twice, closing the window mid-drop) can change or repeat the payout.
+
+  plinko(w: Who, bet: unknown, gate: unknown): ({ ok: true } & PlinkoResult) | Fail {
+    if (!validBet(bet)) return fail("Pick a valid bet.");
+    if (!validGate(gate)) return fail("Pick a drop gate.");
+    if (!this.ctx.wallets.debit(w.clientId, bet)) return fail("Not enough Cafe Beans.");
+    const seed = Math.floor(this.ctx.rng() * 0x7fffffff);
+    const { path, slot } = plinkoRun(seed, gate);
+    const mult = plinkoMult(gate, slot);
+    const win = Math.floor(bet * mult);
+    if (win > 0) this.ctx.wallets.credit(w.clientId, win);
+    this.ctx.touch(w.clientId);
+    return { ok: true, seed, gate, path, slot, mult, win, beans: this.ctx.wallets.balance(w.clientId) };
+  }
+
+  huff(w: Who, machine: unknown, bet: unknown): ({ ok: true } & HuffResultMsg) | Fail {
+    if (machine !== "huff" && machine !== "huffBonus") return fail("No such machine.");
+    if (!validBet(bet)) return fail("Pick a valid bet.");
+    if (!this.ctx.wallets.debit(w.clientId, bet)) return fail("Not enough Cafe Beans.");
+    const r = huffPlay(machine as HuffMachine, bet, this.ctx.rng); // the bonus free spins are played inside this call
+    if (r.total > 0) this.ctx.wallets.credit(w.clientId, r.total);
+    this.ctx.touch(w.clientId);
+    return { ok: true, ...r, machine: machine as HuffMachine, bet, beans: this.ctx.wallets.balance(w.clientId) };
+  }
+
+  private lotteryTickets = 0;
+  lottery(w: Who, pick: unknown): ({ ok: true } & LotteryResult) | Fail {
+    if (!validLotteryNumber(pick)) return fail(`Pick a whole number from ${LOTTERY.MIN} to ${LOTTERY.MAX}.`);
+    if (!this.ctx.wallets.debit(w.clientId, LOTTERY.COST)) return fail(`An entry costs ${LOTTERY.COST} Cafe Beans.`);
+    const draw = lotteryDraw(this.ctx.rng); // drawn after the entry is paid for, from the server's generator
+    const won = draw === pick;
+    if (won) this.ctx.wallets.credit(w.clientId, LOTTERY.JACKPOT);
+    this.ctx.touch(w.clientId);
+    return { ok: true, ticket: ++this.lotteryTickets, pick, draw, won, win: won ? LOTTERY.JACKPOT : 0, beans: this.ctx.wallets.balance(w.clientId) };
   }
 
   // ------------------------------------------------------------ mines

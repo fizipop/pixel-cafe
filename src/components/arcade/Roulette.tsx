@@ -54,7 +54,7 @@ const OUTSIDE: { kind: RouletteBetKind; label: string; cls: string }[] = [
 const betLabel = (b: RouletteBet) => (b.kind === "num" ? `#${b.n}` : b.kind === "low" ? "1-18" : b.kind === "high" ? "19-36" : b.kind);
 
 /** Roulette: the wheel, the shared countdown and your chips. Everyone at the table (seated or watching) sees the same spin. */
-export default function Roulette({ net, onClose, sfx, onStand }: ArcadeProps) {
+export default function Roulette({ net, onClose, sfx, onStand, announce }: ArcadeProps) {
   const beans = useBeans(net);
   const view = useSyncExternalStore(net.subscribe, () => net.roulette, () => null);
   const [chip, setChip] = useState(10);
@@ -92,14 +92,14 @@ export default function Roulette({ net, onClose, sfx, onStand }: ArcadeProps) {
       const staked = view.mine.reduce((n, b) => n + b.amount, 0);
       if (staked > 0) {
         const back = view.returned ?? 0;
-        if (back > 0) { sfx(back >= staked * 5 ? "jackpot" : "cashout"); queueMicrotask(() => setMsg({ text: `${view.result} comes up! You won ${back} (net ${back - staked >= 0 ? "+" : ""}${back - staked}).`, good: true })); }
-        else { sfx("lose"); queueMicrotask(() => setMsg({ text: `${view.result} comes up. No win this time.`, good: false })); }
+        if (back > 0) { sfx(back >= staked * 5 ? "jackpot" : "cashout"); announce(back >= staked * 30 ? "JACKPOT!" : back >= staked * 5 ? "BIG WIN!" : "WINNER!"); queueMicrotask(() => setMsg({ text: `${view.result} comes up! You won ${back} (net ${back - staked >= 0 ? "+" : ""}${back - staked}).`, good: true })); }
+        else { sfx("lose"); if (staked >= 50) announce("BETTER LUCK NEXT TIME!"); queueMicrotask(() => setMsg({ text: `${view.result} comes up. No win this time.`, good: false })); }
       }
     } else if (view.phase === "bet" && last.phase !== "bet") {
       queueMicrotask(() => setMsg(null));
     }
     lastRound.current = { phase: view.phase, result: view.result };
-  }, [view, sfx]);
+  }, [view, sfx, announce]);
 
   const place = async (bet: Omit<RouletteBet, "amount">) => {
     const r = await net.call("roulette:bet", { ...bet, amount: chip });

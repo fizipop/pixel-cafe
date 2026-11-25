@@ -76,7 +76,12 @@ type Pose = {
   lean: number; legF: [number, number]; legB: [number, number]; armF: [number, number]; armB: [number, number];
   head: number; rot: number; lift: number; face: "calm" | "shout" | "squint" | "ko" | "hurt";
 };
-const TH = 13.4, SH = 13.4, UA = 10.2, FA = 9.8, TORSO = 22.5;
+// Athletic 16-bit proportions: long legs, a tall V-shaped torso and a small, sculpted head, about 1:7 head-to-body
+// (crown to chin). HS shrinks every head feature together; NECK is the visible neck between the traps and the jaw.
+const TH = 14.4, SH = 14.2, UA = 10.8, FA = 10.2, TORSO = 23.5, HS = 0.7, NECK = 3.1;
+const H_RY = 6.9 * HS, H_RX = 5.8 * HS; // a narrow, tall head (not a ball)
+const HEAD_D = 4.6 + NECK + H_RY * 0.62; // shoulder line -> chest top -> neck -> jaw -> head centre
+const bulkOf = (def: CharDef, look: Look) => Math.min(look.thick * (def.id === "brawler" ? 1.08 : 1), 1.2);
 
 function ease(t: number) { return t < 0 ? 0 : t > 1 ? 1 : t * t * (3 - 2 * t); }
 
@@ -135,7 +140,7 @@ function poseOf(f: Fighter, def: CharDef, tick: number): Pose {
     }
     default: { // idle: a bouncing guard
       const b = breathe * 0.05;
-      return P(0.12 + b, [0.58 + b, -0.16], [-0.52 - b, 0.2], [0.7, 2.68 + b * 2.5], [0.3, 2.5], "calm", 0, 0, breathe > 0.3 ? 1 : 0);
+      return P(0.1 + b, [0.84 + b, -0.26], [-0.86 - b, 0.24], [0.74, 2.66 + b * 2.5], [0.34, 2.48], "calm", 0, 0, breathe > 0.3 ? 1 : 0); // wide, low guard
     }
   }
 }
@@ -167,8 +172,10 @@ function buildFighter(r: Raster, f: Fighter, def: CharDef, look: Look, p: Pose, 
   const tor = (d: number, side = 0) => ({ x: hip.x + Math.sin(lean) * d + Math.cos(lean) * side, y: hip.y - Math.cos(lean) * d + Math.sin(lean) * side });
   const sh = tor(TORSO), mid = tor(TORSO * 0.45);
   const headA = lean + p.head;
-  const headC = { x: sh.x + Math.sin(headA) * 9.6 + 1.1, y: sh.y - Math.cos(headA) * 9.6 };
-  const neckB = tor(TORSO + 1.5);
+  const bulk = bulkOf(def, look); // the chest grows with build, so the head rides up with it
+  const headR = HEAD_D + (bulk - 1) * 8.8;
+  const headC = { x: sh.x + Math.sin(headA) * headR + 2.0, y: sh.y - Math.cos(headA) * headR };
+  const neckB = tor(TORSO + 1.2);
 
   const M = {
     skin: r.mat(look.skin), head: r.mat(look.head), top: r.mat(look.top), sleeve: r.mat(look.sleeve), fore: r.mat(look.fore), hand: r.mat(look.hand),
@@ -176,6 +183,14 @@ function buildFighter(r: Raster, f: Fighter, def: CharDef, look: Look, p: Pose, 
     vest: look.vest ? r.mat(look.vest) : -1,
   };
   const Z = (z: number) => zBase + z;
+  // cloth folds: short dark creases (and a lit edge beside them) painted only onto the given material, so a sleeve or
+  // trouser crease never lands on skin or a neighbouring limb
+  const cloth = def.id === "karate" || def.id === "ninja";
+  const crease = (a: J, b: J, mat: number, lit = true) => {
+    const n = Math.max(2, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y)));
+    const dk = r.tone(mat, 1), hi = r.tone(mat, 4);
+    for (let k = 0; k <= n; k++) { const x = a.x + ((b.x - a.x) * k) / n, y = a.y + ((b.y - a.y) * k) / n; r.decal(x, y, dk, mat); if (lit) r.decal(x, y - 1, hi, mat); }
+  };
 
   // ---- legs (far first; the z-buffer sorts it out)
   const leg = (l: [number, number], side: number, far: number) => {
@@ -188,18 +203,29 @@ function buildFighter(r: Raster, f: Fighter, def: CharDef, look: Look, p: Pose, 
     const A = at(hj.x, hj.y), B = at(kn.x, kn.y), C = at(an.x, an.y), D = at(toe.x, toe.y);
     const wide = def.id === "karate" ? 1.18 : 1;
     // shorts on the kickboxer: the lower half of the thigh is bare
-    const thighPaint = def.id === "kickboxer" ? (u: number) => (u > 0.55 ? M.skin : u < 0.12 ? M.trim : -1) : undefined;
-    r.capsule(A.x, A.y, zz, B.x, B.y, zz, rad(5.2 * th * wide), rad(4.3 * th * wide), M.legU, { ...o(far), paint: thighPaint });
+    const thighPaint = def.id === "kickboxer" ? (u: number) => (u > 0.55 ? M.skin : u > 0.49 ? M.trim : -1) : undefined;
+    r.capsule(A.x, A.y, zz, B.x, B.y, zz, rad(5.0 * th * wide), rad(3.6 * th * wide), M.legU, { ...o(far), paint: thighPaint });
+    // quad sweep: a front-of-thigh mass just above the knee
+    const along = (a: J, b: J, t: number, off: number, ang: number) => at(a.x + (b.x - a.x) * t + Math.cos(ang) * off, a.y + (b.y - a.y) * t - Math.sin(ang) * off);
+    const Q0 = along(hj, kn, 0.3, 1.2, l[0]), Q1 = along(hj, kn, 0.72, 1.3, l[0]);
+    r.capsule(Q0.x, Q0.y, zz + 1.5, Q1.x, Q1.y, zz + 1.5, rad(3.8 * th * wide), rad(3.0 * th * wide), M.legU, { ...o(far), paint: thighPaint && ((u: number) => thighPaint(0.3 + u * 0.42)) });
     const shinPaint = def.id === "kickboxer" ? (u: number) => (u > 0.8 ? M.foot : -1) : def.id === "karate" ? (u: number) => (u > 0.9 ? M.skin : -1) : undefined;
-    r.capsule(B.x, B.y, zz, C.x, C.y, zz, rad(4.3 * th * wide), rad(3.3 * th * (def.id === "karate" ? 1.25 : 1)), M.legL, { ...o(far), paint: shinPaint });
-    r.capsule(C.x, C.y, zz + 0.5, D.x, D.y, zz + 0.5, rad(2.9 * th), rad(2.1 * th), M.foot, o(far, def.id === "brawler"));
+    r.capsule(B.x, B.y, zz, C.x, C.y, zz, rad(3.6 * th * wide), rad(2.4 * th * (def.id === "karate" ? 1.35 : 1)), M.legL, { ...o(far), paint: shinPaint });
+    // calf: a diamond of muscle on the back of the upper shin, tapering into a slim ankle
+    const K0 = along(kn, an, 0.12, -1.3, l[1]), K1 = along(kn, an, 0.5, -0.9, l[1]);
+    r.capsule(K0.x, K0.y, zz + 0.4, K1.x, K1.y, zz + 0.4, rad(3.3 * th * wide), rad(2.5 * th * wide), M.legL, o(far));
+    r.capsule(C.x, C.y, zz + 0.5, D.x, D.y, zz + 0.5, rad(2.6 * th), rad(1.8 * th), M.foot, o(far, def.id === "brawler"));
+    if (cloth && far === 0) { // baggy gi / ninja trousers: a fold under the knee and a drape line down the thigh
+      crease(along(hj, kn, 0.85, -2.5, l[0]), along(kn, an, 0.18, 2.4, l[1]), M.legL);
+      crease(along(hj, kn, 0.25, 0.6, l[0]), along(hj, kn, 0.7, 1.9, l[0]), M.legU, false);
+    }
     return D;
   };
   const footB = leg(p.legB, -1, 1);
   const footF = leg(p.legF, 1, 0);
 
   // ---- torso
-  const P0 = at(hip.x, hip.y), P1 = at(mid.x, mid.y), P2 = at(sh.x, sh.y + 3);
+  const P0 = at(hip.x, hip.y), P1 = at(mid.x, mid.y), P2 = at(sh.x, sh.y + 3.5);
   const tW = th * (def.id === "brawler" ? 1.08 : 1);
   const beltY = (u: number) => u < 0.24;
   const bellyPaint = (u: number, v: number) => {
@@ -215,17 +241,28 @@ function buildFighter(r: Raster, f: Fighter, def: CharDef, look: Look, p: Pose, 
     if (def.id === "brawler") return Math.abs(v) > 0.5 && M.vest >= 0 ? M.vest : u > 0.88 && Math.abs(v) > 0.3 && M.vest >= 0 ? M.vest : -1;
     return -1;
   };
-  r.ellipsoid(P0.x, P0.y + rad(1), Z(0), rad(7 * tW), rad(5.6 * tW), def.id === "karate" ? M.top : M.legU, o());
-  r.capsule(P0.x, P0.y - rad(1), Z(0), P1.x, P1.y, Z(0.5), rad(6.4 * tW), rad(7.1 * tW), M.top, { ...o(), paint: bellyPaint });
-  r.capsule(P1.x, P1.y, Z(0.5), P2.x, P2.y, Z(0.5), rad(7.4 * tW), rad(8.6 * tW), M.top, { ...o(), paint: chestPaint });
+  // V-taper: narrow hips and waist flaring out to a deep chest and broad lats
+  r.ellipsoid(P0.x, P0.y + rad(1), Z(0), rad(6.3 * tW), rad(5.2 * tW), def.id === "karate" ? M.top : M.legU, o());
+  r.capsule(P0.x, P0.y - rad(1), Z(0), P1.x, P1.y, Z(0.5), rad(5.5 * tW), rad(6.4 * tW), M.top, { ...o(), paint: bellyPaint });
+  r.capsule(P1.x, P1.y, Z(0.5), P2.x, P2.y, Z(0.5), rad(6.9 * tW), rad(8.8 * bulk), M.top, { ...o(), paint: chestPaint });
   if (def.id === "kickboxer" || def.id === "brawler") { // muscle definition: pecs and abs pushed through the skin
     for (const sd of [-1, 1]) { const q = at(sh.x + Math.sin(lean) * -5 + sd * 0.4 + 2.4, sh.y + 5 + Math.cos(lean) * 0.5); r.ellipsoid(q.x + sd * rad(3.3), q.y, Z(4.2), rad(4.2 * tW), rad(3.4 * tW), M.top, o()); }
     if (def.id === "kickboxer") for (let k = 0; k < 3; k++) for (const sd of [-1, 1]) { const q = at(mid.x + 2.6 - k * 0.2, mid.y + 1.5 + k * 3.2 - 4); r.ellipsoid(q.x + sd * rad(1.9), q.y, Z(5.3), rad(1.9), rad(1.5), M.top, o()); }
   }
+  if (cloth) { // the gi jacket drapes: two diagonal folds from the chest toward the belt, and the belt knot's tails
+    const c0 = at(tor(TORSO * 0.82, 2.5).x, tor(TORSO * 0.82, 2.5).y), c1 = at(tor(TORSO * 0.35, 0.5).x, tor(TORSO * 0.35, 0.5).y);
+    crease(c0, c1, M.top);
+    const d0 = at(tor(TORSO * 0.7, -1).x, tor(TORSO * 0.7, -1).y), d1 = at(tor(TORSO * 0.3, -2.5).x, tor(TORSO * 0.3, -2.5).y);
+    crease(d0, d1, M.top, false);
+    if (def.id === "karate") { const kn = at(tor(TORSO * 0.18, 4).x, tor(TORSO * 0.18, 4).y); for (let t = 0; t < 4; t++) { r.decal(kn.x + s * t * 0.4, kn.y + t, r.tone(M.belt, 3), -1); r.decal(kn.x + s * (t * 0.4 + 2), kn.y + t, r.tone(M.belt, 2), -1); } }
+  }
   // shoulders and neck
-  const shN = tor(TORSO - 1.5, 1.6), shF = tor(TORSO - 1.5, -1.2);
+  // broad shoulders: the joints sit wide of the spine, with sloping trapezius up into a thick neck
+  const shN = tor(TORSO - 2.2, 3.0), shF = tor(TORSO - 2.2, -2.6);
   const NB = at(neckB.x, neckB.y), HC = at(headC.x, headC.y);
-  r.capsule(NB.x, NB.y, Z(0), (NB.x + HC.x) / 2, (NB.y + HC.y) / 2, Z(0), rad(3.4 * th), rad(3.2 * th), def.id === "ninja" ? M.top : M.skin, o());
+  const neckMat = def.id === "ninja" ? M.top : M.skin;
+  r.capsule(NB.x, NB.y, Z(0), HC.x + (NB.x - HC.x) * 0.25, HC.y + (NB.y - HC.y) * 0.25, Z(0), rad(3.0 * th), rad(2.4 * th), neckMat, o());
+  for (const sp of [shN, shF]) { const T = at(sp.x, sp.y); r.capsule(NB.x, NB.y + rad(0.6), Z(-0.5), T.x, T.y, Z(-0.5), rad(2.6 * th), rad(3.4 * th), def.id === "kickboxer" || def.id === "brawler" ? M.skin : M.top, o(sp === shF ? 0.5 : 0)); }
 
   // ---- arms (in the torso's frame)
   const arm = (a: [number, number], base: J, zz: number, far: number) => {
@@ -234,12 +271,19 @@ function buildFighter(r: Raster, f: Fighter, def: CharDef, look: Look, p: Pose, 
     const e2 = ax(a[1], FA), hd = { x: el.x + e2.x, y: el.y + e2.y };
     const A = at(base.x, base.y), B = at(el.x, el.y), C = at(hd.x, hd.y);
     const zA = Z(zz);
-    r.sphere(A.x, A.y, zA, rad(4.6 * th), def.id === "karate" || def.id === "ninja" ? M.sleeve : M.skin, o(far));
-    r.capsule(A.x, A.y, zA, B.x, B.y, zA, rad(3.7 * th), rad(3.1 * th), M.sleeve, o(far));
+    // capped deltoid, an upper arm with a bicep peak, and a forearm that is thick at the elbow and slim at the wrist
+    r.sphere(A.x, A.y, zA, rad(5.1 * th), def.id === "karate" || def.id === "ninja" ? M.sleeve : M.skin, o(far));
+    r.capsule(A.x, A.y, zA, B.x, B.y, zA, rad(3.6 * th), rad(2.9 * th), M.sleeve, o(far));
+    const fr = (ang: number, t: number, off: number) => at(base.x + e1.x * t + Math.cos(ang + lean) * off, base.y + e1.y * t - Math.sin(ang + lean) * off);
+    const Bi0 = fr(a[0], 0.3, 1.0), Bi1 = fr(a[0], 0.68, 1.1);
+    r.capsule(Bi0.x, Bi0.y, zA + 0.8, Bi1.x, Bi1.y, zA + 0.8, rad(3.0 * th), rad(3.2 * th), M.sleeve, o(far));
     const forePaint = def.id === "karate" ? (u: number) => (u < 0.18 ? M.sleeve : -1) : def.id === "brawler" ? (u: number) => (u > 0.82 ? M.trim : -1) : undefined;
-    r.capsule(B.x, B.y, zA + 0.5, C.x, C.y, zA + 0.8, rad(3.2 * th), rad(2.7 * th), M.fore, { ...o(far), paint: forePaint });
+    r.capsule(B.x, B.y, zA + 0.5, C.x, C.y, zA + 0.8, rad(3.6 * th), rad(2.3 * th), M.fore, { ...o(far), paint: forePaint });
+    const F0 = at(el.x + e2.x * 0.12, el.y + e2.y * 0.12), F1 = at(el.x + e2.x * 0.45, el.y + e2.y * 0.45); // forearm belly
+    r.capsule(F0.x, F0.y, zA + 0.9, F1.x, F1.y, zA + 0.9, rad(3.4 * th), rad(2.7 * th), M.fore, { ...o(far), paint: def.id === "karate" ? forePaint : undefined });
     const gl = def.id === "kickboxer" ? 4.2 : 3.4;
     r.ellipsoid(C.x, C.y, zA + 1.2, rad(gl * Math.min(1.25, th)), rad((gl - 0.4) * Math.min(1.25, th)), M.hand, o(far, def.id === "kickboxer"));
+    if (cloth && far === 0) { const k0 = at(el.x - e1.x * 0.18, el.y - e1.y * 0.18), k1 = at(el.x + e2.x * 0.12, el.y + e2.y * 0.12); crease({ x: k0.x - rad(2), y: k0.y }, { x: k1.x + rad(2), y: k1.y }, M.sleeve); } // sleeve bunching at the elbow
     return C;
   };
   arm(p.armB, shF, -6.5, 1);
@@ -247,56 +291,77 @@ function buildFighter(r: Raster, f: Fighter, def: CharDef, look: Look, p: Pose, 
 
   // ---- head
   const hx = HC.x, hy = HC.y;
-  const hr = rad(6.2), hry = rad(7);
-  const bandY0 = hy - hry * 0.8, bandY1 = hy - hry * 0.5;
-  const headPaint = def.id === "ninja"
-    ? (_u: number, _v: number, _x: number, y: number) => (y >= hy - hry * 0.4 && y <= hy + hry * 0.05 ? -1 : y < hy - hry * 0.4 && y > hy - hry * 0.62 ? M.trim : M.top)
+  const hd = (v: number) => rad(v * HS); // head-space units: every feature shrinks with the head
+  const hr = rad(H_RX), hry = rad(H_RY);
+  const ninja = def.id === "ninja";
+  const bandY0 = hy - hry * 0.78, bandY1 = hy - hry * 0.52;
+  const headPaint = ninja
+    ? (_u: number, _v: number, _x: number, y: number) => (y >= hy - hry * 0.42 && y <= hy + hry * 0.02 ? -1 : y < hy - hry * 0.42 && y > hy - hry * 0.64 ? M.trim : M.top)
     : def.id === "karate" ? (_u: number, _v: number, _x: number, y: number) => (y >= bandY0 && y <= bandY1 ? M.trim : -1)
-      : def.id === "kickboxer" ? (_u: number, _v: number, _x: number, y: number) => (y >= bandY0 + 1 && y <= bandY1 - 0.5 ? M.trim : -1) : undefined;
-  r.ellipsoid(hx, hy, Z(1), hr, hry, M.head, { ...o(), paint: headPaint });
-  const fx = (d: number) => hx + s * rad(d);
-  r.ellipsoid(fx(2.6), hy + rad(3.6), Z(2.5), rad(3.7), rad(3), M.head, { ...o(), paint: def.id === "ninja" ? () => M.top : undefined }); // jaw
-  r.sphere(fx(5.9), hy + rad(0.6), Z(4), rad(1.45), def.id === "ninja" ? M.top : M.head, o()); // nose
-  r.sphere(hx - s * rad(0.6), hy + rad(0.4), Z(5.2), rad(1.6), def.id === "ninja" ? M.top : M.skin, o()); // ear
-  // hair
+      : def.id === "kickboxer" ? (_u: number, _v: number, _x: number, y: number) => (y >= bandY0 + 0.5 && y <= bandY1 - 0.5 ? M.trim : -1) : undefined;
+  // cranium: taller than wide, set slightly back so the face profile is flat, not a ball
+  r.ellipsoid(hx - s * hd(0.4), hy - hd(0.3), Z(1), hr, hry, M.head, { ...o(), paint: headPaint });
+  const fx = (d: number) => hx + s * hd(d);
+  const faceMat = ninja ? M.top : M.head, hood = ninja ? () => M.top : undefined;
+  // the face is built from hard, flat planes (not balls): each facet is lit as one plane, so the jaw, cheekbones, brow
+  // and nose read as angular structure with crisp light/shadow edges, and the jaw angle and chin cut the silhouette
+  const F = (pts: number[]) => pts.flatMap((v, k) => (k % 2 ? [hy + hd(v)] : [fx(v)]));
+  const plane = (pts: number[], z: number, n: [number, number, number], mat = M.head, paint = hood) => r.facet(F(pts), Z(z), n[0] * s, n[1], n[2], mat, { ...o(), paint });
+  plane([-1.3, 1.2, -0.7, 4.5, 3.2, 6.1, 4.9, 5.0, 4.7, 2.9, 2.3, 1.5], 6.2, [0.2, 0.15, 0.95]); // side of the jaw, ear to chin
+  plane([-0.7, 4.5, 3.2, 6.1, 2.4, 6.6, -0.3, 5.1], 6.3, [0, 0.95, 0.3]); // underside of the jaw: a hard shadow line
+  plane([3.4, 4.0, 5.1, 4.1, 5.0, 5.6, 3.3, 6.1], 6.5, [0.55, 0.15, 0.82]); // squared chin
+  plane([0.9, 0.3, 3.9, 0.5, 4.3, 2.2, 2.0, 2.7], 6.6, [0.35, -0.35, 0.87], faceMat, undefined); // cheekbone, catching the light
+  plane([2.3, -2.5, 5.5, -2.1, 5.7, -1.0, 2.5, -1.1], 6.8, [0.2, -0.7, 0.7]); // brow ridge
+  plane([4.5, -1.1, 6.4, 2.0, 4.9, 2.4], 7, [0.7, -0.1, 0.72], faceMat, undefined); // nose bridge and tip
+  plane([4.9, 2.4, 6.4, 2.0, 5.6, 2.8], 7, [0, 1, 0.15], faceMat, undefined); // shadow under the nose
+  r.sphere(fx(-0.9), hy + hd(0.5), Z(5.2), hd(1.5), ninja ? M.top : M.skin, o()); // ear
+  // hair (and the ninja's hood), all in head units
   const hairPaint = def.id === "karate" ? (_u: number, _v: number, _x: number, y: number) => (y >= bandY0 && y <= bandY1 ? M.trim : -1)
-    : def.id === "kickboxer" ? (_u: number, _v: number, _x: number, y: number) => (y >= bandY0 + 1 && y <= bandY1 - 0.5 ? M.trim : -1) : undefined;
+    : def.id === "kickboxer" ? (_u: number, _v: number, _x: number, y: number) => (y >= bandY0 + 0.5 && y <= bandY1 - 0.5 ? M.trim : -1) : undefined;
   if (def.id === "karate") {
-    r.ellipsoid(hx - s * rad(1.2), hy - rad(2.6), Z(0.4), rad(6.5), rad(5.4), M.hair, { ...o(0, true), paint: hairPaint });
-    for (const [ang, len] of [[-2.4, 7], [-1.9, 8], [-1.35, 6.6], [-2.85, 5.5]] as const) { const a2 = ang; r.capsule(hx - s * rad(1.5), hy - rad(4.2), Z(-0.5), hx - s * rad(1.5) + Math.cos(a2) * rad(len) * s * -1, hy - rad(4.2) + Math.sin(a2) * rad(len), Z(-0.5), rad(2.2), rad(0.6), M.hair, o(0, true)); }
+    r.ellipsoid(hx - s * hd(1.4), hy - hd(2.9), Z(0.4), hd(6.2), hd(5.0), M.hair, { ...o(0, true), paint: hairPaint });
+    for (const [ang, len] of [[-2.4, 7.4], [-1.9, 8.4], [-1.35, 6.8], [-2.85, 6]] as const) r.capsule(hx - s * hd(1.6), hy - hd(4.4), Z(-0.5), hx - s * hd(1.6) - Math.cos(ang) * hd(len) * s, hy - hd(4.4) + Math.sin(ang) * hd(len), Z(-0.5), hd(2.3), hd(0.5), M.hair, o(0, true));
   } else if (def.id === "kickboxer") {
-    r.ellipsoid(hx - s * rad(0.9), hy - rad(2.9), Z(0.3), rad(6.4), rad(4.8), M.hair, { ...o(0, true), paint: hairPaint });
+    r.ellipsoid(hx - s * hd(1.0), hy - hd(3.2), Z(0.3), hd(6.1), hd(4.4), M.hair, { ...o(0, true), paint: hairPaint });
+    r.capsule(hx - s * hd(4.6), hy - hd(1.5), Z(0.2), hx - s * hd(4.4), hy + hd(2.8), Z(0.2), hd(1.8), hd(1.2), M.hair, o(0, true)); // short back and sides
   } else if (def.id === "brawler") {
-    r.ellipsoid(hx - s * rad(3.2), hy - rad(0.8), Z(-0.8), rad(3.6), rad(5.4), M.hair, o(0, true));
-    for (let k = 0; k < 5; k++) { const a2 = -Math.PI * (0.18 + k * 0.16); r.sphere(hx - s * rad(0.5) + Math.cos(a2) * rad(6.6) * s, hy - rad(1) + Math.sin(a2) * rad(7.2), Z(0), rad(2.4 - Math.abs(k - 2) * 0.25), M.hair, o(0, true)); }
+    r.ellipsoid(hx - s * hd(3.4), hy - hd(0.6), Z(-0.8), hd(3.4), hd(5.2), M.hair, o(0, true));
+    for (let k = 0; k < 5; k++) { const a2 = -Math.PI * (0.18 + k * 0.16); r.sphere(hx - s * hd(0.6) + Math.cos(a2) * hd(6.4) * s, hy - hd(1.2) + Math.sin(a2) * hd(7.0), Z(0), hd(2.5 - Math.abs(k - 2) * 0.25), M.hair, o(0, true)); }
   } else { // ninja hood bulk at the back
-    r.ellipsoid(hx - s * rad(1.6), hy - rad(0.5), Z(-1), rad(6.2), rad(6.8), M.top, o());
+    r.ellipsoid(hx - s * hd(1.8), hy - hd(0.4), Z(-1), hd(6.0), hd(6.8), M.top, o());
   }
   // headband / scarf tails streaming behind
-  if (def.id === "karate" || def.id === "ninja") {
-    const len = def.id === "ninja" ? 13 : 9;
-    let px = hx - s * rad(5.4), py = def.id === "ninja" ? hy - rad(3.6) : (bandY0 + bandY1) / 2;
+  if (def.id === "karate" || ninja) {
+    const len = ninja ? 13 : 9;
+    let px = hx - s * hd(5.4), py = ninja ? hy - hd(3.6) : (bandY0 + bandY1) / 2;
     for (let k = 1; k <= 4; k++) {
-      const w = Math.sin(tick / 4 + k * 1.3) * rad(1.4) + (f.vx * -s) * 0.4;
-      const nx = px - s * rad(len / 4), ny = py + rad(0.9) + w;
-      r.capsule(px, py, Z(-2), nx, ny, Z(-2), rad(1.3 - k * 0.12), rad(1.1 - k * 0.12), M.trim, o(0.2));
+      const w = Math.sin(tick / 4 + k * 1.3) * rad(1.2) + (f.vx * -s) * 0.4;
+      const nx = px - s * rad(len / 4), ny = py + rad(0.8) + w;
+      r.capsule(px, py, Z(-2), nx, ny, Z(-2), rad(1.1 - k * 0.1), rad(0.95 - k * 0.1), M.trim, o(0.2));
       px = nx; py = ny;
     }
   }
-  // face details, only where the head itself is visible
-  const ex = fx(3.4), ey = hy - rad(0.9);
-  if (p.face === "ko") { for (const d of [-1, 0, 1]) { r.decal(ex + d, ey + d, P_INK, M.head); r.decal(ex - d, ey + d, P_INK, M.head); } }
-  else if (p.face === "squint" || p.face === "hurt") { for (let d = -1; d <= 1; d++) r.decal(ex + d * s, ey + (p.face === "hurt" ? (d === 0 ? -1 : 0) : 0), P_INK, M.head); }
-  else { r.decal(ex, ey, P_EYE, M.head); r.decal(ex - s, ey, P_EYE, M.head); r.decal(ex + s, ey, P_INK, M.head); r.decal(ex, ey + 1, P_EYE, M.head); r.decal(ex + s, ey + 1, P_INK, M.head); }
-  for (let d = -1; d <= 2; d++) r.decal(ex - s + d * s, ey - 2 - (d >= 1 ? 0 : 1) * 0 + (d === 2 ? 1 : 0), P_INK, M.head); // brow, angled down toward the nose
-  if (def.id !== "ninja") {
-    const mx = fx(3.6), my = hy + rad(3.4);
-    if (p.face === "shout" || p.face === "hurt" || p.face === "ko") { r.decal(mx, my, P_MOUTH, M.head); r.decal(mx + s, my, P_MOUTH, M.head); r.decal(mx, my + 1, P_INK, M.head); r.decal(mx + s, my + 1, P_MOUTH, M.head); }
-    else { r.decal(mx, my, P_INK, M.head); r.decal(mx + s, my, P_INK, M.head); }
+  // face details, only where the head itself is visible. dot() keeps them crisp at any scale (2x2 in the portraits).
+  const pxs = Math.max(1, Math.round(sc / 1.6));
+  const dot = (x: number, y: number, col: number) => { for (let a = 0; a < pxs; a++) for (let b = 0; b < pxs; b++) r.decal(x + a, y + b, col, M.head); };
+  const ex = Math.round(fx(3.6)), ey = Math.round(hy - hd(0.6)), u = s * pxs;
+  const shade = r.tone(M.head, 1);
+  if (p.face === "ko") { for (const d of [-1, 0, 1]) { dot(ex + d * pxs, ey + d * pxs, P_INK); dot(ex - d * pxs, ey + d * pxs, P_INK); } }
+  else if (p.face === "squint" || p.face === "hurt") { for (let d = -1; d <= 1; d++) dot(ex + d * u, ey + (p.face === "hurt" && d === 0 ? -pxs : 0), P_INK); }
+  else { dot(ex - u, ey, P_EYE); dot(ex, ey, P_INK); } // a narrow, determined eye: white then pupil toward the opponent
+  // heavy brow angled down to the nose, with its shadow under it
+  for (let d = -1; d <= 1; d++) dot(ex + d * u, ey - pxs * 2 + (d === 1 ? pxs : 0), P_INK);
+  dot(ex - u * 2, ey - pxs, shade);
+  if (!ninja) {
+    // (cheek, jaw and nose shading now come from the facial planes; only the features are painted)
+    const mx = Math.round(fx(4.0)), my = Math.round(hy + hd(3.5));
+    if (p.face === "shout" || p.face === "hurt" || p.face === "ko") { dot(mx, my, P_MOUTH); dot(mx + u, my, P_MOUTH); dot(mx, my + pxs, P_INK); dot(mx + u, my + pxs, P_MOUTH); }
+    else { dot(mx, my, P_INK); dot(mx + u, my, P_INK); dot(mx - u, my + pxs, shade); }
+    dot(Math.round(fx(3.6)), Math.round(hy + hd(5.4)), shade); // under the chin
   }
-  if (def.id === "brawler") for (let d = 0; d < 4; d++) r.decal(fx(1.5 + d * 0.9), hy + rad(4.4) + (d & 1), r.tone(M.head, 1), M.head); // stubble
+  if (def.id === "brawler") for (let d = 0; d < 4; d++) dot(Math.round(fx(1.2 + d * 0.9)), Math.round(hy + hd(4.6)) + (d & 1), shade); // stubble
   void P_GOLD;
-  return { hand: handF, foot: footF, feet: { x: (footF.x + footB.x) / 2, y: Math.max(footF.y, footB.y) }, headTop: hy - hry - 4 };
+  return { hand: handF, foot: footF, feet: { x: (footF.x + footB.x) / 2, y: Math.max(footF.y, footB.y) }, headTop: hy - hry - hd(4) };
 }
 
 // ------------------------------------------------------------------ the rooftop dojo (baked once)
@@ -661,9 +726,10 @@ function portraitOf(def: CharDef, side: 0 | 1, alt: boolean): HTMLCanvasElement 
   r.begin();
   const fake = { face: side === 0 ? 1 : -1, vx: 0, c: CHARACTERS.indexOf(def) } as unknown as Fighter;
   const pose: Pose = { lean: 0.05, legF: [0, 0], legB: [0, 0], armF: [0.25, 0.4], armB: [0.1, 0.3], head: 0, rot: 0, lift: 0, face: "calm" };
-  const sc = 1.85;
-  // feet far below the frame so only the head and shoulders land in it
-  buildFighter(r, fake, def, lookOf(def, alt), pose, N / 2 - fake.face * 4, N + (TH * 2 + TORSO + 2.5) * sc - 2, 0, false, 0, sc);
+  // a tight head-and-traps bust: at this scale the sculpted head fills the frame like a CPS-2 select portrait
+  const sc = 2.7;
+  // feet far below the frame so only the head, neck and shoulders land in it (head centre at y = 15)
+  buildFighter(r, fake, def, lookOf(def, alt), pose, N / 2 - fake.face * 7, 15 + (TH + SH + TORSO + HEAD_D + (bulkOf(def, lookOf(def, alt)) - 1) * 8.8) * sc, 0, false, 0, sc);
   r.finish(2.5);
   const out = document.createElement("canvas"); out.width = N; out.height = N;
   const g = out.getContext("2d")!;

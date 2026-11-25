@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { fmtTime, newRace, positions, raceBeans, stepRace, type Race, type RaceInput } from "@/shared/racer";
+import { RACE, fmtTime, newRace, positions, raceBeans, stepRace, type Race, type RaceInput } from "@/shared/racer";
 import { RacerView, VH, VW } from "@/game/racerArt";
 import { mulberry32 } from "@/shared/arcade";
 import type { RunFinish, RunStart } from "@/shared/protocol";
@@ -13,7 +13,9 @@ const ORDINAL = ["1st", "2nd", "3rd"];
 const ord = (n: number) => ORDINAL[n - 1] ?? `${n}th`;
 
 /** Neon Drift GP: a behind-the-car 3D race against a 20-car field. Arrow keys / WASD steer, Space or Shift drifts. Your result is checked by the server. */
-export default function Racer({ net, onClose, sfx }: ArcadeProps) {
+export default function Racer({ net, onClose, sfx, announce }: ArcadeProps) {
+  const annRef = useRef(announce);
+  useEffect(() => { annRef.current = announce; }, [announce]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const race = useRef<Race | null>(null);
   const input = useRef<RaceInput>({ left: false, right: false, up: false, down: false, drift: false });
@@ -47,7 +49,9 @@ export default function Racer({ net, onClose, sfx }: ArcadeProps) {
     window.addEventListener("keydown", kd);
     window.addEventListener("keyup", ku);
     const rng = mulberry32(token.current);
-    let raf = 0, last = performance.now(), acc = 0, tick = 0, finished = false;
+    let raf = 0, last = performance.now(), acc = 0, tick = 0, finished = false, wasUp = false, wasDrift = false;
+    // the countdown lights: the announcer counts the grid down so "GO!" lands with the green light
+    const countdown = window.setTimeout(() => annRef.current("THREE, TWO, ONE! GO!"), Math.max(0, RACE.COUNTDOWN_MS - 2700));
     const STEP = 1000 / 60;
     const loop = (now: number) => {
       const r = race.current;
@@ -58,7 +62,15 @@ export default function Racer({ net, onClose, sfx }: ArcadeProps) {
         while (acc >= STEP && !r.done) {
           stepRace(r, input.current, STEP, rng);
           acc -= STEP;
-          for (const ev of r.events.splice(0)) sfxRef.current(ev === "boost" ? "jump" : ev === "oil" ? "splash" : ev === "lap" ? "ding" : ev === "go" ? "win" : "clack");
+          for (const ev of r.events.splice(0)) {
+            sfxRef.current(ev === "boost" ? "whoosh" : ev === "oil" ? "splash" : ev === "lap" ? "ding" : ev === "go" ? "engine" : ev === "scrape" ? "screech" : "clack");
+            if (ev === "lap" && r.cars[0].lap === RACE.LAPS - 1) annRef.current("FINAL LAP!");
+          }
+          // engine rev when you floor it, tyre squeal when a drift starts
+          const inp = input.current, me0 = r.cars[0];
+          if (inp.up && !wasUp && r.t > RACE.COUNTDOWN_MS) sfxRef.current("engine");
+          if (me0.drifting && !wasDrift) sfxRef.current("screech");
+          wasUp = inp.up; wasDrift = me0.drifting;
         }
         tick++;
         if (c) view.current.render(c, r, tick);
@@ -70,6 +82,12 @@ export default function Racer({ net, onClose, sfx }: ArcadeProps) {
           void net.call<RunFinish>("racer:finish", { token: token.current, totalMs: total, bestLapMs: bestLap, position: pos }).then((f) => {
             setResult(f.ok ? { pos, total, best: bestLap, fin: f } : { pos, total, best: bestLap, err: f.reason });
             if (f.ok && f.beans > 0) sfxRef.current("cashout");
+            // the finish: a record beats everything, then first place, a podium, or commiseration
+            if (f.ok && f.best) annRef.current("NEW RECORD!");
+            else if (pos === 1) annRef.current("FIRST PLACE!");
+            else if (pos <= 3) annRef.current("WINNER!");
+            else annRef.current("BETTER LUCK NEXT TIME!");
+            if (f.ok && f.best && pos === 1) window.setTimeout(() => annRef.current("FIRST PLACE!"), 2200);
             setPhase("done");
           });
         }
@@ -77,7 +95,7 @@ export default function Racer({ net, onClose, sfx }: ArcadeProps) {
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
-    return () => { cancelAnimationFrame(raf); window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku); };
+    return () => { cancelAnimationFrame(raf); window.clearTimeout(countdown); window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku); };
   }, [phase, net]);
 
   return (

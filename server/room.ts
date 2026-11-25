@@ -6,6 +6,7 @@
 import { SeatState, type SeatSnapshot } from "../src/game/seats.ts";
 import { arcadeSeatInfo } from "../src/game/arcadeLayout.ts";
 import { isFireSeat } from "../src/game/rooftopLayout.ts";
+import { ALL_NPC_SEATS } from "../src/game/crowd.ts";
 import { GAME_NPC, GAME_SEAT_PREFIX, NPC_SEATS, PRIVATE_CAPACITY, PRIVATE_TABLES, buildSeats, privateTableOf } from "../src/game/layout.ts";
 import { WorldStore, newWorld, type WorldAction } from "../src/game/worldState.ts";
 import { chooseMove, type Side } from "../src/game/tictactoe.ts";
@@ -112,7 +113,7 @@ export class Room {
       wallets: this.arcade.wallets,
       pushWallet: (clientId) => this.arcade.pushWallet(clientId),
     });
-    for (const [seatId, who] of Object.entries(NPC_SEATS)) this.seats.sit(who, seatId); // NPCs' chairs are taken
+    for (const [seatId, who] of Object.entries(ALL_NPC_SEATS)) this.seats.sit(who, seatId); // NPCs' chairs are taken (cafe, crew, arcade crowd)
     this.world = new WorldStore(newWorld());
     this.world.dispatch({ type: "ttt", action: { type: "join", side: "O", by: GAME_NPC } }); // Theo plays "O"
     this.world.subscribe((state) => {

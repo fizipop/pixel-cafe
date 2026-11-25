@@ -10,14 +10,24 @@ export type SfxName =
   // Floor 3: rooftop
   | "twinkle" | "shutter" | "sizzle"
   // Floor 2: fighting, pool, rhythm
-  | "punch" | "block" | "ko" | "clack" | "pocket";
+  | "punch" | "block" | "ko" | "clack" | "pocket"
+  // the shared arcade layer: coins, Plinko, racing, combat, rhythm, draws, bonuses and announcer stingers
+  | "coin" | "select" | "peg" | "land" | "engine" | "screech" | "whoosh" | "kick" | "combo" | "beatHit" | "perfect" | "streak"
+  | "drawTick" | "drawReveal" | "bonus" | "nearMiss" | "stinger" | "stingerBig";
 
 export const SFX_NAMES: SfxName[] = [
   "click", "interact", "sit", "stand", "pour", "froth", "ding", "beans",
   "purr", "meow", "place", "win", "lose", "page", "gift", "emote", "jukebox",
   "elevator", "spin", "reelStop", "cardFlip", "chip", "cashout", "jump", "splash", "boom", "jackpot",
   "twinkle", "shutter", "sizzle", "punch", "block", "ko", "clack", "pocket",
+  "coin", "select", "peg", "land", "engine", "screech", "whoosh", "kick", "combo", "beatHit", "perfect", "streak",
+  "drawTick", "drawReveal", "bonus", "nearMiss", "stinger", "stingerBig",
 ];
+
+/** Sounds that may legitimately repeat fast (peg bounces, draw ticks) get a shorter repeat guard than the default. */
+const MIN_GAP: Partial<Record<SfxName, number>> = { peg: 28, drawTick: 30, beatHit: 30, coin: 35 };
+/** At most this many effects may start in any 250 ms window: a burst of events never turns into a wall of noise. */
+const BURST_MAX = 6;
 
 type Ctx = BaseAudioContext;
 type Recipe = (c: Ctx, out: AudioNode, t: number, noise: AudioBuffer) => void;
@@ -262,6 +272,86 @@ const RECIPES: Record<SfxName, Recipe> = {
     });
     tone(c, out, t + 0.55, { f0: 2093, dur: 0.9, vel: 0.2, attack: 0.002 });
   },
+  coin: (c, out, t) => {
+    // a bean / coin clink: two bright partials and a little ring
+    tone(c, out, t, { type: "square", f0: 1976, dur: 0.05, vel: 0.1 });
+    tone(c, out, t + 0.045, { f0: 2637, dur: 0.22, vel: 0.14, attack: 0.002 });
+    tone(c, out, t + 0.045, { f0: 3951, dur: 0.12, vel: 0.05, attack: 0.002 });
+  },
+  select: (c, out, t) => {
+    tone(c, out, t, { type: "square", f0: 660, dur: 0.05, vel: 0.08 });
+    tone(c, out, t + 0.05, { type: "square", f0: 990, dur: 0.07, vel: 0.08 });
+  },
+  peg: (c, out, t) => {
+    // a tiny glassy tick, pitch nudged each time so a cascade of bounces sounds like a ball rattling down
+    const f = 1500 + Math.random() * 900;
+    tone(c, out, t, { type: "triangle", f0: f, f1: f * 0.8, dur: 0.05, vel: 0.12, attack: 0.001 });
+  },
+  land: (c, out, t, n) => {
+    tone(c, out, t, { type: "triangle", f0: 330, f1: 160, dur: 0.18, vel: 0.22 });
+    burst(c, out, n, t, { filter: "bandpass", f0: 1200, q: 1.4, dur: 0.08, vel: 0.12 });
+    tone(c, out, t + 0.12, { f0: 1319, dur: 0.25, vel: 0.12 });
+  },
+  engine: (c, out, t) => {
+    // a short rev: a sawtooth growl that climbs and falls back
+    const o = c.createOscillator(); o.type = "sawtooth";
+    o.frequency.setValueAtTime(70, t); o.frequency.exponentialRampToValueAtTime(190, t + 0.28); o.frequency.exponentialRampToValueAtTime(110, t + 0.55);
+    const lp = c.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 900;
+    const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16, t + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    o.connect(lp); lp.connect(g); g.connect(out); o.start(t); o.stop(t + 0.62);
+  },
+  screech: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "bandpass", f0: 2600, f1: 1900, q: 9, dur: 0.45, vel: 0.16, attack: 0.03 });
+    tone(c, out, t, { type: "sawtooth", f0: 1250, f1: 980, dur: 0.4, vel: 0.03, attack: 0.03 });
+  },
+  whoosh: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "bandpass", f0: 400, f1: 3200, q: 1.2, dur: 0.45, vel: 0.3, attack: 0.12 });
+    tone(c, out, t, { type: "triangle", f0: 200, f1: 900, dur: 0.35, vel: 0.08 });
+  },
+  kick: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "lowpass", f0: 1800, f1: 260, dur: 0.16, vel: 0.32, attack: 0.002 });
+    tone(c, out, t, { type: "square", f0: 120, f1: 45, dur: 0.16, vel: 0.24 });
+    burst(c, out, n, t, { filter: "highpass", f0: 3000, dur: 0.05, vel: 0.12 });
+  },
+  combo: (c, out, t) => {
+    [784, 988, 1175, 1568].forEach((f, i) => tone(c, out, t + i * 0.04, { type: "square", f0: f, dur: 0.06, vel: 0.07 }));
+  },
+  beatHit: (c, out, t) => {
+    tone(c, out, t, { type: "square", f0: 880, f1: 660, dur: 0.05, vel: 0.08 });
+  },
+  perfect: (c, out, t) => {
+    tone(c, out, t, { type: "square", f0: 1319, dur: 0.06, vel: 0.08 });
+    tone(c, out, t + 0.03, { f0: 2637, dur: 0.12, vel: 0.08, attack: 0.002 });
+  },
+  streak: (c, out, t) => {
+    [523, 784, 1047, 1568, 2093].forEach((f, i) => tone(c, out, t + i * 0.05, { type: "square", f0: f, dur: 0.08, vel: 0.07 }));
+  },
+  drawTick: (c, out, t) => {
+    tone(c, out, t, { type: "square", f0: 1200 + Math.random() * 400, dur: 0.025, vel: 0.06, attack: 0.001 });
+  },
+  drawReveal: (c, out, t, n) => {
+    burst(c, out, n, t, { filter: "highpass", f0: 3000, dur: 0.2, vel: 0.12 });
+    tone(c, out, t, { type: "square", f0: 392, dur: 0.12, vel: 0.12 });
+    tone(c, out, t + 0.12, { type: "square", f0: 784, dur: 0.3, vel: 0.12 });
+  },
+  bonus: (c, out, t) => {
+    // a wind-up ratchet that springs into a fanfare
+    for (let i = 0; i < 8; i++) tone(c, out, t + i * 0.045, { type: "square", f0: 300 + i * 70, dur: 0.03, vel: 0.08 });
+    [784, 988, 1175, 1568, 1976].forEach((f, i) => tone(c, out, t + 0.4 + i * 0.07, { f0: f, dur: 0.3, vel: 0.15 }));
+  },
+  nearMiss: (c, out, t) => {
+    tone(c, out, t, { type: "square", f0: 784, dur: 0.1, vel: 0.1 });
+    tone(c, out, t + 0.1, { type: "square", f0: 740, f1: 520, dur: 0.35, vel: 0.1 });
+  },
+  stinger: (c, out, t) => {
+    // the short synth chime that leads into an announcer line
+    tone(c, out, t, { type: "square", f0: 659, dur: 0.08, vel: 0.09 });
+    tone(c, out, t + 0.08, { type: "square", f0: 988, dur: 0.16, vel: 0.09 });
+  },
+  stingerBig: (c, out, t) => {
+    [523, 659, 784, 1047].forEach((f, i) => tone(c, out, t + i * 0.06, { type: "square", f0: f, dur: 0.12, vel: 0.1 }));
+    tone(c, out, t + 0.26, { type: "sawtooth", f0: 1047, dur: 0.4, vel: 0.06 });
+  },
   jukebox: (c, out, t, n) => {
     burst(c, out, n, t, { filter: "highpass", f0: 2500, dur: 0.3, vel: 0.12, attack: 0.02 });
     tone(c, out, t + 0.04, { type: "triangle", f0: 180, f1: 420, dur: 0.3, vel: 0.22 });
@@ -338,10 +428,14 @@ export class Sfx {
     if (!ctx || !master || !noise || !this.enabled || this.muted || this.volume <= 0) return;
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
     const now = performance.now();
-    if (now - (this.last.get(name) ?? 0) < 45) return; // never machine-gun the same sound
+    if (now - (this.last.get(name) ?? 0) < (MIN_GAP[name] ?? 45)) return; // never machine-gun the same sound
+    this.recent = this.recent.filter((t) => now - t < 250);
+    if (this.recent.length >= BURST_MAX) return; // too many different effects at once: drop this one
+    this.recent.push(now);
     this.last.set(name, now);
     RECIPES[name](ctx, master, ctx.currentTime + 0.005, noise);
   }
+  private recent: number[] = [];
 
   stop() {
     this.ctx?.close().catch(() => {});

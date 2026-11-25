@@ -15,7 +15,10 @@ const KEYS: Record<string, number> = {
 const Cap = ({ children }: { children: string }) => <kbd className="mx-0.5 inline-block min-w-[1.4em] rounded border-b-2 border-bark bg-cream px-1 text-center font-bold text-espresso">{children}</kbd>;
 
 /** Pixel Fighter II: a side-view 1v1. The server runs the fight (CPU ladder or another player); this window draws it and sends your buttons. */
-export default function Fighter({ net, onClose, sfx }: ArcadeProps) {
+export default function Fighter({ net, onClose, sfx, announce }: ArcadeProps) {
+  const annRef = useRef(announce);
+  useEffect(() => { annRef.current = announce; }, [announce]);
+  const called = useRef<{ round: number; over: boolean }>({ round: 0, over: false });
   const view = useSyncExternalStore(net.subscribe, () => net.fighter, () => null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [char, setChar] = useState(0);
@@ -37,12 +40,34 @@ export default function Fighter({ net, onClose, sfx }: ArcadeProps) {
     const m = view?.match;
     if (!m || m === lastMatch.current) return;
     lastMatch.current = m;
+    // the announcer calls each round in once, at the start of its intro
+    if (m.phase === "intro" && called.current.round !== m.round) {
+      called.current = { round: m.round, over: false };
+      const last = m.wins[0] === m.wins[1] && m.wins[0] > 0; // one round each: the decider
+      annRef.current(m.round === 1 ? "ROUND ONE! FIGHT!" : last ? "FINAL ROUND! FIGHT!" : "ROUND TWO! FIGHT!");
+    }
     for (const e of m.ev as FightEvent[]) {
-      if (e.k === "hit") { sparks.current.push({ x: e.x, y: e.y, t: 0, kind: e.heavy ? "heavy" : "hit" }); sfxRef.current("punch"); if (e.heavy) shake.current = 5; }
+      if (e.k === "hit") { sparks.current.push({ x: e.x, y: e.y, t: 0, kind: e.heavy ? "heavy" : "hit" }); sfxRef.current(e.heavy ? "kick" : "punch"); if (e.heavy) { shake.current = 5; sfxRef.current("combo"); } }
       else if (e.k === "block") { sparks.current.push({ x: e.x, y: e.y, t: 0, kind: "block" }); sfxRef.current("block"); }
-      else if (e.k === "ko") { sparks.current.push({ x: e.x, y: e.y, t: 0, kind: "ko" }); sfxRef.current("ko"); shake.current = 9; flash.current = 0.8; }
+      else if (e.k === "ko") {
+        sparks.current.push({ x: e.x, y: e.y, t: 0, kind: "ko" }); sfxRef.current("ko"); shake.current = 9; flash.current = 0.8;
+        // a K.O., and PERFECT! if the winner of the round took no damage at all
+        const loser = m.f[0].hp <= 0 ? 0 : 1, winner = 1 - loser;
+        const perfect = m.f[winner].hp >= CHARACTERS[m.f[winner].c].hp;
+        annRef.current(perfect ? "PERFECT!" : "K.O.!");
+      }
       else if (e.k === "swing") sfxRef.current("emote");
     }
+  }, [view]);
+
+  // match over: YOU WIN! / YOU LOSE!
+  useEffect(() => {
+    if (view?.mode !== "over" || !view.match) { if (view?.mode !== "over") called.current.over = false; return; }
+    if (called.current.over) return;
+    called.current.over = true;
+    const won = view.match.winner === view.me;
+    window.setTimeout(() => annRef.current(won ? "YOU WIN!" : "YOU LOSE!"), 1400); // after the K.O. call has finished
+    if (won) sfxRef.current("win");
   }, [view]);
 
   // draw loop

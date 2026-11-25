@@ -1,8 +1,10 @@
 import * as Phaser from "phaser";
 import { ellipse, make, rect, type Ctx } from "./art";
-import { WALL_H, WORLD_H, WORLD_W } from "./constants";
+import { WALL_H, WORLD_W } from "./constants";
 import { FLOOR2_X } from "@/shared/floors";
-import { BLACKJACK, POKER, POOL_TABLE, ROULETTE } from "./arcadeLayout";
+import { ARCADE_H, BLACKJACK, CASINO_ROW, LOUNGE_AREA, POKER, POOL_TABLE, RIGS, RIG, ROULETTE } from "./arcadeLayout";
+
+const WORLD_H = ARCADE_H; // Floor 2 is taller than the other floors
 
 // Floor 2 art, all drawn in code like the rest of the cafe: a dark patterned arcade carpet,
 // glowing neon trim, retro cabinets, card/roulette tables and a leaderboard kiosk.
@@ -37,12 +39,40 @@ function drawBackground(c: Ctx) {
       if (hash(col, row, 3) > 0.8) rect(c, "#3a2c70", x + 4 + Math.floor(hash(col, row, 4) * 22), y + 3, 2, 2); // stray sparkle
     }
   }
+  // CASINO: a red-and-gold patterned carpet under the slot row, Plinko and the lottery booth
+  {
+    const x = 60, y = CASINO_ROW - 52, w = 540, h = 180;
+    rect(c, "#0d0a1c", x - 4, y - 4, w + 8, h + 8);
+    rect(c, "#c8a040", x - 2, y - 2, w + 4, h + 4);
+    for (let ty = 0; ty < h; ty += 16) for (let tx = 0; tx < w; tx += 16) {
+      rect(c, ((tx + ty) / 16) % 2 ? "#5a0a1c" : "#6a1024", x + tx, y + ty, 16, 16);
+      rect(c, "#c8a040", x + tx + 7, y + ty + 7, 2, 2);
+      rect(c, "#8a2a3a", x + tx + 3, y + ty + 3, 1, 1); rect(c, "#8a2a3a", x + tx + 12, y + ty + 12, 1, 1);
+    }
+  }
+  // SPORTS LOUNGE: a deep green rug with a pitch-line pattern
+  {
+    const x = LOUNGE_AREA.x - FLOOR2_X, y = LOUNGE_AREA.y, w = LOUNGE_AREA.w, h = LOUNGE_AREA.h;
+    rect(c, "#0d0a1c", x - 3, y - 3, w + 6, h + 6);
+    rect(c, "#1c4a2c", x, y, w, h);
+    for (let i = 0; i < w; i += 24) rect(c, i % 48 ? "#1f5232" : "#1a4428", x + i, y, 24, h);
+    rect(c, "#cfe9d0", x + 6, y + 6, w - 12, 1); rect(c, "#cfe9d0", x + 6, y + h - 7, w - 12, 1);
+    rect(c, "#cfe9d0", x + 6, y + 6, 1, h - 12); rect(c, "#cfe9d0", x + w - 7, y + 6, 1, h - 12);
+    rect(c, "#cfe9d0", x + w / 2, y + 6, 1, h - 12);
+  }
+  // NEON DRIFT GP: a chequered-flag mat under the racing rigs
+  {
+    const x = RIGS[0].x - FLOOR2_X - 14, y = RIGS[0].y - 6, w = RIGS[1].x - RIGS[0].x + RIG.w + 28, h = RIG.cabH + RIG.seatH + 34;
+    rect(c, "#0d0a1c", x - 3, y - 3, w + 6, h + 6);
+    for (let ty = 0; ty < h; ty += 8) for (let tx = 0; tx < w; tx += 8) rect(c, ((tx + ty) / 8) % 2 ? "#1a1a22" : "#e8e8f0", x + tx, y + ty, 8, 8);
+    rect(c, "#f2a93b", x, y, w, 2); rect(c, "#f2a93b", x, y + h - 2, w, 2);
+  }
   // two rugs under the tables
   for (const t of [BLACKJACK, ROULETTE, POKER, POOL_TABLE]) {
     const x = t.x - FLOOR2_X - 24;
     const y = t.y - 8;
     const w = t.w + 48;
-    const h = t.h + (t === POKER ? 120 : t === POOL_TABLE ? 142 : 96);
+    const h = t.h + (t === POKER ? 120 : t === POOL_TABLE ? 142 : 70);
     rect(c, "#0d0a1c", x - 4, y - 4, w + 8, h + 8);
     rect(c, "#3a1f58", x, y, w, h);
     rect(c, "#5a2f7a", x + 4, y + 4, w - 8, h - 8);

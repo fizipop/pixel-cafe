@@ -4,11 +4,14 @@ import CharacterPreview from "../CharacterPreview";
 import type { NetClient } from "@/net/client";
 import { BET_PRESETS, MAX_BET, MIN_BET, type SlotSymbol } from "@/shared/arcade";
 import type { SfxName } from "@/lib/sfx";
+import type { AnnounceLine } from "@/lib/announcer";
 
 export type ArcadeProps = {
   net: NetClient;
   onClose: () => void;
   sfx: (n: SfxName) => void;
+  /** The shared arcade announcer (voice + stinger). Only call it for real game events. */
+  announce: (line: AnnounceLine) => void;
   /** Stand up from the table you are sitting at (blackjack / roulette). */
   onStand?: () => void;
 };

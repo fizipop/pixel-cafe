@@ -7,6 +7,7 @@ import type { Entry } from "../lib/guestbook.ts";
 import type { Floor } from "./floors.ts";
 import type { BjResult, Card, PenguinLane, RouletteBet, SlotSymbol } from "./arcade.ts";
 import type { FightMatch } from "./fighter.ts";
+import type { HuffMachine, HuffResult, PlinkoGate } from "./casino.ts";
 import type { PoolGroup } from "./pool.ts";
 import type { PackedSprite, RoastGrade } from "./rooftop.ts";
 
@@ -92,6 +93,10 @@ export type BoardRow = { name: string; value: number; mine: boolean };
 export type BoardView = { penguin: BoardRow[]; moon: BoardRow[]; drift: BoardRow[]; beat: BoardRow[]; fighter: BoardRow[]; rich: BoardRow[] };
 
 export type SlotsResult = { reels: SlotSymbol[]; mult: number; win: number; beans: number };
+/** Plinko: the seed the server rolled (replaying plinkoRun(seed, gate) gives exactly this path), where it landed and the payout. */
+export type PlinkoResult = { seed: number; gate: PlinkoGate; path: (-1 | 1)[]; slot: number; mult: number; win: number; beans: number };
+export type HuffResultMsg = HuffResult & { machine: HuffMachine; bet: number; beans: number };
+export type LotteryResult = { ticket: number; pick: number; draw: number; won: boolean; win: number; beans: number };
 
 export type MinesView = {
   active: boolean;
@@ -273,6 +278,9 @@ export interface ClientToServer {
   "beans:earn": (p: { amount: number }) => void; // from a drink you made or a gift you gave
   // ---- Floor 2 mini-games (every one answers with an Ack)
   "slots:spin": (p: { bet: number }, ack: (r: Ack<SlotsResult>) => void) => void;
+  "plinko:drop": (p: { bet: number; gate: number }, ack: (r: Ack<PlinkoResult>) => void) => void;
+  "huff:spin": (p: { machine: HuffMachine; bet: number }, ack: (r: Ack<HuffResultMsg>) => void) => void;
+  "lottery:enter": (p: { pick: number }, ack: (r: Ack<LotteryResult>) => void) => void;
   "mines:state": (ack: (r: Ack<{ view: MinesView }>) => void) => void; // pick up a round you left running
   "mines:start": (p: { bet: number; mines: number }, ack: (r: Ack<{ view: MinesView }>) => void) => void;
   "mines:reveal": (p: { tile: number }, ack: (r: Ack<{ view: MinesView }>) => void) => void;
@@ -324,7 +332,7 @@ export type RooftopEvent = (typeof ROOFTOP_EVENTS)[number];
 
 /** The arcade requests the server routes to the Arcade class (see server/arcade.ts). */
 export const ARCADE_EVENTS = [
-  "slots:spin", "mines:state", "mines:start", "mines:reveal", "mines:cashout", "crash:join", "crash:leave", "crash:bet", "crash:cashout",
+  "slots:spin", "plinko:drop", "huff:spin", "lottery:enter", "mines:state", "mines:start", "mines:reveal", "mines:cashout", "crash:join", "crash:leave", "crash:bet", "crash:cashout",
   "roulette:join", "roulette:leave", "roulette:bet", "roulette:clear", "bj:bet", "bj:hit", "bj:stand", "bj:double",
   "penguin:state", "penguin:start", "penguin:step", "penguin:cashout", "pk:buyin", "pk:act", "pk:bot",
   "pl:start", "pl:accept", "pl:shot", "pl:resign", "fg:join", "fg:cancel", "fg:input",

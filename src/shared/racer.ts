@@ -7,8 +7,11 @@ export const RACE = {
   ACC: 330, BRAKE: 420, MAX: 330, BOOST_MAX: 470, DRAG: 0.7, OFF_DRAG: 3.2, TURN: 2.5,
   GRIP: 0.9, DRIFT_GRIP: 0.992, BOOST_MS: 1100, OIL_MS: 900, CAR_R: 11,
   // solid boundary: a barrier runs EDGE px either side of the centreline (past the curbs and a strip of grass run-off);
-  // canyon walls stand behind it. Cars are CAR_HL long and CAR_HW wide (half extents) for the barrier test.
-  EDGE: 70, CAR_HL: 13, CAR_HW: 7, WALL_BOUNCE: 0.25, SCRAPE: 1.4,
+  // canyon walls stand behind it. Cars are CAR_HL long and CAR_HW wide (half extents, bumper to bumper and outer tyre
+  // wall to outer tyre wall: the renderer's car model is built to exactly this box), used for the barrier clamp
+  // (max lateral offset = EDGE - the body's sideways reach) and for car-to-car contact. CAR_GAP keeps a sliver of air
+  // between two bodies in contact so they never draw interpenetrated. CAR_R is only the grid-spacing radius.
+  EDGE: 70, CAR_HL: 13, CAR_HW: 7, CAR_GAP: 0.6, WALL_BOUNCE: 0.25, SCRAPE: 1.4,
   PAD_HL: 22, PAD_HW: 26, OIL_RX: 22, OIL_RY: 14, // boost pad (half length/width along the road) and oil slick (ellipse radii)
 } as const;
 
@@ -258,11 +261,30 @@ export function touchHazards(c: Car, tr: Track, ev: RaceEvent[] | null) {
   c.slick = slick;
 }
 
-function cpuInput(c: Car, tr: Track, rng: () => number, t: number): RaceInput {
+function cpuInput(c: Car, tr: Track, rng: () => number, t: number, cars: Car[]): RaceInput {
   const n = tr.pts.length;
   const ti = (c.idx + 7) % n, nx = tr.pts[(ti + 1) % n], tp = tr.pts[ti];
   const tl = Math.hypot(nx.x - tp.x, nx.y - tp.y) || 1;
-  const target = { x: tp.x - ((nx.y - tp.y) / tl) * c.lane, y: tp.y + ((nx.x - tp.x) / tl) * c.lane }; // each CPU holds its own lane
+  // each CPU holds its own lane, but swings out to pass a car that is in its way instead of shunting it into a pile
+  let lane = c.lane, lift = false;
+  const hx = Math.cos(c.angle), hy = Math.sin(c.angle);
+  const bend = Math.abs(Math.atan2(tr.tx[c.idx] * tr.ty[ti] - tr.ty[c.idx] * tr.tx[ti], tr.tx[c.idx] * tr.tx[ti] + tr.ty[c.idx] * tr.ty[ti]));
+  for (const o of cars) {
+    if (o === c) continue;
+    const dx = o.x - c.x, dy = o.y - c.y, ahead = dx * hx + dy * hy;
+    if (ahead <= 0 || ahead > RACE.CAR_HL * 2 + 22) continue;
+    const side = -dx * hy + dy * hx; // > 0: the other car is to our right
+    if (Math.abs(side) > RACE.CAR_HW * 2 + 3) continue;
+    const closing = (c.vx - o.vx) * hx + (c.vy - o.vy) * hy;
+    if (closing < 8 && ahead > RACE.CAR_HL * 2 + 4) continue;
+    // pass on the straights; in a hairpin just back off and queue rather than dive down the inside
+    if (bend < 0.45) lane += (side > 0 || (side === 0 && c.lane > 0) ? -1 : 1) * (RACE.CAR_HW * 2 + 4);
+    lift = ahead < RACE.CAR_HL * 2 + 4 && closing > 40;
+    break;
+  }
+  const room = RACE.ROAD / 2 - RACE.CAR_HW - 8;
+  lane = Math.max(-room, Math.min(room, lane));
+  const target = { x: tp.x - ((nx.y - tp.y) / tl) * lane, y: tp.y + ((nx.x - tp.x) / tl) * lane };
   let diff = Math.atan2(target.y - c.y, target.x - c.x) - c.angle;
   diff = Math.atan2(Math.sin(diff), Math.cos(diff));
   const wobble = Math.sin(t / 700 + c.id * 2) * 0.05;
@@ -270,7 +292,7 @@ function cpuInput(c: Car, tr: Track, rng: () => number, t: number): RaceInput {
   const speed = Math.hypot(c.vx, c.vy);
   const maxSpeed = RACE.MAX * c.skill;
   void rng;
-  return { left: diff + wobble < -0.04, right: diff + wobble > 0.04, up: speed < maxSpeed * (sharp ? 0.7 : 1), down: sharp && speed > maxSpeed * 0.85, drift: false };
+  return { left: diff + wobble < -0.04, right: diff + wobble > 0.04, up: !lift && speed < maxSpeed * (sharp ? 0.7 : 1), down: sharp && speed > maxSpeed * 0.85, drift: false };
 }
 
 export function stepRace(r: Race, input: RaceInput, dtMs: number, rng: () => number) {
@@ -282,7 +304,7 @@ export function stepRace(r: Race, input: RaceInput, dtMs: number, rng: () => num
   if (racing && r.t - dtMs < RACE.COUNTDOWN_MS) r.events.push("go");
   for (const c of r.cars) {
     if (c.finishedAt !== null) { c.vx *= 0.97; c.vy *= 0.97; c.x += c.vx * dt; c.y += c.vy * dt; confine(c, tr, dt, null); c.idx = nearest(c, tr).idx; continue; }
-    if (racing) drive(c, c.human ? input : cpuInput(c, tr, rng, r.t), dt, tr, c.human ? r.events : []);
+    if (racing) drive(c, c.human ? input : cpuInput(c, tr, rng, r.t, r.cars), dt, tr, c.human ? r.events : []);
     const { idx } = nearest(c, tr);
     const n = tr.pts.length;
     // lap = a full circuit of checkpoints followed by crossing the line
@@ -299,23 +321,70 @@ export function stepRace(r: Race, input: RaceInput, dtMs: number, rng: () => num
     }
     c.idx = idx;
   }
-  // cars bump each other: separate them, then a real impulse along the contact normal (equal masses, a little
-  // restitution) so a rear-ender passes speed on and a side swipe deflects both cars
-  for (let i = 0; i < r.cars.length; i++) for (let j = i + 1; j < r.cars.length; j++) {
+  // cars bump each other as real boxes: separate them along the axis of least overlap, then a real impulse along that
+  // normal (equal masses, a little restitution) so a rear-ender passes speed on through the bumpers and a side swipe
+  // deflects both cars door to door. Two passes settle a three-car squeeze without leaving anyone stacked in another.
+  for (let pass = 0; pass < 2; pass++) for (let i = 0; i < r.cars.length; i++) for (let j = i + 1; j < r.cars.length; j++) {
     const a = r.cars[i], b = r.cars[j];
-    const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy);
-    if (d > 0 && d < RACE.CAR_R * 2) {
-      const push = (RACE.CAR_R * 2 - d) / 2, nx = dx / d, ny = dy / d;
-      a.x -= nx * push; a.y -= ny * push; b.x += nx * push; b.y += ny * push;
-      const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
-      const jn = (vn < 0 ? (-(1 + 0.3) * vn) / 2 : 0) + 12;
-      a.vx -= nx * jn; a.vy -= ny * jn; b.vx += nx * jn; b.vy += ny * jn;
-      if ((a.human || b.human) && vn < -15) r.events.push("bump");
-      // a shove must never push either car through a barrier
-      confine(a, tr, 0, null); confine(b, tr, 0, null);
-    }
+    const hit = carContact(a, b);
+    if (!hit) continue;
+    const { nx, ny, depth } = hit, push = depth / 2;
+    a.x -= nx * push; a.y -= ny * push; b.x += nx * push; b.y += ny * push;
+    const vn = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+    const jn = (vn < 0 ? (-(1 + 0.3) * vn) / 2 : 0) + (pass === 0 ? 12 : 0);
+    a.vx -= nx * jn; a.vy -= ny * jn; b.vx += nx * jn; b.vy += ny * jn;
+    if (pass === 0 && (a.human || b.human) && vn < -15) r.events.push("bump");
+    // a shove must never push either car through a barrier
+    confine(a, tr, 0, null); confine(b, tr, 0, null);
   }
   if (r.cars.every((c) => c.finishedAt !== null) || r.cars[0].finishedAt !== null && r.t - RACE.COUNTDOWN_MS > r.cars[0].finishedAt + 4000) r.done = true;
+}
+
+/**
+ * Oriented-box contact between two cars (separating-axis test on both cars' forward and sideways axes), with CAR_GAP of
+ * clearance. Returns the unit normal from a to b and how far they must separate, or null when the boxes are apart.
+ */
+export function carContact(a: Car, b: Car): { nx: number; ny: number; depth: number } | null {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const HL = RACE.CAR_HL + RACE.CAR_GAP / 2, HW = RACE.CAR_HW + RACE.CAR_GAP / 2;
+  const reach = 2 * Math.hypot(HL, HW);
+  if (dx * dx + dy * dy >= reach * reach) return null;
+  const fa = [Math.cos(a.angle), Math.sin(a.angle)], fb = [Math.cos(b.angle), Math.sin(b.angle)];
+  const axes = [fa, [-fa[1], fa[0]], fb, [-fb[1], fb[0]]];
+  const ext = (f: number[], lx: number, ly: number) => HL * Math.abs(f[0] * lx + f[1] * ly) + HW * Math.abs(-f[1] * lx + f[0] * ly);
+  let best = Infinity, nx = 0, ny = 0;
+  for (const [lx, ly] of axes) {
+    const d = dx * lx + dy * ly;
+    const over = ext(fa, lx, ly) + ext(fb, lx, ly) - Math.abs(d);
+    if (over <= 0) return null; // a separating axis: no contact
+    if (over < best) { best = over; const sg = d < 0 ? -1 : 1; nx = lx * sg; ny = ly * sg; }
+  }
+  if (dx === 0 && dy === 0) { nx = -fa[1]; ny = fa[0]; } // dead-centre overlap: split them sideways
+  return { nx, ny, depth: best };
+}
+
+// ------------------------------------------------------------------ scenery geometry (used by the renderer)
+
+export const CLEAR_MAX = 300;
+/**
+ * Walk outward from centreline sample i along its normal (side -1 left, 1 right) and return the last offset whose ground
+ * is still closest to sample i: the medial axis between this stretch of road and every other one. Pure geometry, so it is
+ * computed once and exported for the tests.
+ */
+export function groundClearance(pts: { x: number; y: number }[], nx: ArrayLike<number>, ny: ArrayLike<number>, i: number, side: -1 | 1): number {
+  const n = pts.length, px = pts[i].x, py = pts[i].y;
+  let ok = 0; // the last offset that was checked and still belongs to sample i
+  for (let o = 4; o <= CLEAR_MAX; o += 3) {
+    const x = px + nx[i] * side * o, y = py + ny[i] * side * o;
+    const lim = (o * 0.96 - 2) ** 2;
+    for (let j = 0; j < n; j++) {
+      if (j === i) continue;
+      const dx = pts[j].x - x, dy = pts[j].y - y;
+      if (dx * dx + dy * dy < lim) return ok;
+    }
+    ok = o;
+  }
+  return ok;
 }
 
 /** 1-based race position of each car right now (finished cars by finish time, the rest by distance covered). */
