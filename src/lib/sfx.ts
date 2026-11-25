@@ -13,7 +13,9 @@ export type SfxName =
   | "punch" | "block" | "ko" | "clack" | "pocket"
   // the shared arcade layer: coins, Plinko, racing, combat, rhythm, draws, bonuses and announcer stingers
   | "coin" | "select" | "peg" | "land" | "engine" | "screech" | "whoosh" | "kick" | "combo" | "beatHit" | "perfect" | "streak"
-  | "drawTick" | "drawReveal" | "bonus" | "nearMiss" | "stinger" | "stingerBig";
+  | "drawTick" | "drawReveal" | "bonus" | "nearMiss" | "stinger" | "stingerBig"
+  // game-show backing for the announcer: brass fanfares, a drumroll, a riser, the crowd, and a PA chime with echo
+  | "fanfare" | "fanfareBig" | "drumroll" | "riser" | "crowdCheer" | "crowdGasp" | "crowdAww" | "paEcho";
 
 export const SFX_NAMES: SfxName[] = [
   "click", "interact", "sit", "stand", "pour", "froth", "ding", "beans",
@@ -22,6 +24,7 @@ export const SFX_NAMES: SfxName[] = [
   "twinkle", "shutter", "sizzle", "punch", "block", "ko", "clack", "pocket",
   "coin", "select", "peg", "land", "engine", "screech", "whoosh", "kick", "combo", "beatHit", "perfect", "streak",
   "drawTick", "drawReveal", "bonus", "nearMiss", "stinger", "stingerBig",
+  "fanfare", "fanfareBig", "drumroll", "riser", "crowdCheer", "crowdGasp", "crowdAww", "paEcho",
 ];
 
 /** Sounds that may legitimately repeat fast (peg bounces, draw ticks) get a shorter repeat guard than the default. */
@@ -74,6 +77,42 @@ function burst(c: Ctx, out: AudioNode, noise: AudioBuffer, t: number, o: NoiseOp
   g.connect(out);
   src.start(t, o.offset ?? 0);
   src.stop(t + o.dur + 0.03);
+}
+
+/** One brass note: two detuned saws through a lowpass that opens on the attack, with a gentle vibrato. */
+function brass(c: Ctx, out: AudioNode, t: number, f: number, dur: number, vel: number) {
+  const lp = c.createBiquadFilter(); lp.type = "lowpass"; lp.Q.value = 2;
+  lp.frequency.setValueAtTime(f * 1.2, t); lp.frequency.exponentialRampToValueAtTime(f * 6, t + 0.05); lp.frequency.exponentialRampToValueAtTime(f * 2.5, t + dur);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel, t + 0.03); g.gain.setValueAtTime(vel * 0.8, t + dur * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  const vib = c.createOscillator(); vib.frequency.value = 5.5;
+  const vg = c.createGain(); vg.gain.value = f * 0.008;
+  vib.connect(vg);
+  for (const det of [-6, 7]) {
+    const o = c.createOscillator(); o.type = "sawtooth"; o.frequency.value = f; o.detune.value = det;
+    vg.connect(o.frequency);
+    o.connect(lp); o.start(t); o.stop(t + dur + 0.05);
+  }
+  lp.connect(g); g.connect(out);
+  vib.start(t); vib.stop(t + dur + 0.05);
+}
+/** A cymbal-ish swell: bright noise rising and fading. */
+function swell(c: Ctx, out: AudioNode, t: number, dur: number) {
+  const n = c.createBuffer(1, Math.ceil(c.sampleRate * dur), c.sampleRate);
+  const d = n.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  burst(c, out, n, t, { filter: "highpass", f0: 4000, dur, vel: 0.1, attack: dur * 0.35 });
+}
+/** A crowd layer: band-limited noise with a slow random wobble, like many voices at once. */
+function crowd(c: Ctx, out: AudioNode, n: AudioBuffer, t: number, f: number, dur: number, vel: number) {
+  const src = c.createBufferSource(); src.buffer = n; src.loop = true;
+  const bp = c.createBiquadFilter(); bp.type = "bandpass"; bp.frequency.value = f; bp.Q.value = 0.8;
+  const am = c.createGain(); am.gain.value = 0.7;
+  const lfo = c.createOscillator(); lfo.frequency.value = 3 + Math.random() * 4;
+  const lg = c.createGain(); lg.gain.value = 0.3; lfo.connect(lg); lg.connect(am.gain);
+  const env = c.createGain();
+  env.gain.setValueAtTime(0.0001, t); env.gain.exponentialRampToValueAtTime(vel, t + 0.12); env.gain.setValueAtTime(vel, t + dur * 0.6); env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(bp); bp.connect(am); am.connect(env); env.connect(out);
+  src.start(t, Math.random()); lfo.start(t); src.stop(t + dur + 0.05); lfo.stop(t + dur + 0.05);
 }
 
 const RECIPES: Record<SfxName, Recipe> = {
@@ -351,6 +390,60 @@ const RECIPES: Record<SfxName, Recipe> = {
   stingerBig: (c, out, t) => {
     [523, 659, 784, 1047].forEach((f, i) => tone(c, out, t + i * 0.06, { type: "square", f0: f, dur: 0.12, vel: 0.1 }));
     tone(c, out, t + 0.26, { type: "sawtooth", f0: 1047, dur: 0.4, vel: 0.06 });
+  },
+  fanfare: (c, out, t) => {
+    // a short brass call: stacked saws through a warm filter, a little vibrato, a rising triad
+    [[392, 0], [523, 0.12], [659, 0.24], [784, 0.36]].forEach(([f, d], i) => brass(c, out, t + d, f, i === 3 ? 0.55 : 0.16, 0.13));
+  },
+  fanfareBig: (c, out, t) => {
+    // the full show fanfare: a triplet pickup into a held major chord with a cymbal swell
+    [[523, 0], [523, 0.09], [523, 0.18], [659, 0.3]].forEach(([f, d]) => brass(c, out, t + d, f, 0.1, 0.12));
+    for (const f of [523, 659, 784, 1047]) brass(c, out, t + 0.44, f, 0.9, 0.09);
+    swell(c, out, t + 0.3, 1.1);
+  },
+  drumroll: (c, out, t, n) => {
+    // a snare roll that speeds up and swells, ending on a crash: the "and the winner is..." moment
+    let at = t;
+    for (let i = 0; i < 26; i++) {
+      const gap = 0.055 - i * 0.0012;
+      burst(c, out, n, at, { filter: "bandpass", f0: 1800, q: 0.9, dur: 0.05, vel: 0.06 + i * 0.006, attack: 0.002 });
+      at += gap;
+    }
+    burst(c, out, n, at + 0.02, { filter: "highpass", f0: 5000, dur: 0.6, vel: 0.22, attack: 0.003 }); // the crash
+    tone(c, out, at + 0.02, { type: "triangle", f0: 110, f1: 55, dur: 0.3, vel: 0.25 }); // and a kick under it
+  },
+  riser: (c, out, t, n) => {
+    // a sweeping noise riser with a climbing tone underneath: tension before a reveal
+    burst(c, out, n, t, { filter: "bandpass", f0: 300, f1: 6000, q: 2, dur: 0.75, vel: 0.18, attack: 0.6 });
+    tone(c, out, t, { type: "sawtooth", f0: 180, f1: 880, dur: 0.75, vel: 0.05, attack: 0.5 });
+  },
+  crowdCheer: (c, out, t, n) => {
+    // a crowd roar: several overlapping filtered-noise "voices" with a wobbling swell, plus a few whoops
+    for (let k = 0; k < 4; k++) crowd(c, out, n, t + k * 0.04, 700 + k * 380, 1.4, 0.07);
+    for (let k = 0; k < 3; k++) tone(c, out, t + 0.15 + k * 0.22, { type: "triangle", f0: 600 + k * 90, f1: 1100 + k * 80, dur: 0.18, vel: 0.03 });
+  },
+  crowdGasp: (c, out, t, n) => {
+    // a sharp intake of breath from the crowd: a short noise swell that drops in pitch
+    burst(c, out, n, t, { filter: "bandpass", f0: 2400, f1: 900, q: 1.4, dur: 0.45, vel: 0.12, attack: 0.08 });
+    burst(c, out, n, t + 0.02, { filter: "bandpass", f0: 1500, f1: 600, q: 1.2, dur: 0.4, vel: 0.08, attack: 0.1 });
+  },
+  crowdAww: (c, out, t, n) => {
+    // a sympathetic "awww": a soft vowel-like hum that sags downward over a murmur
+    for (const f of [220, 277, 330]) tone(c, out, t, { type: "sawtooth", f0: f * 1.1, f1: f * 0.8, dur: 0.8, vel: 0.02, attack: 0.15 });
+    crowd(c, out, n, t, 600, 0.8, 0.05);
+  },
+  paEcho: (c, out, t) => {
+    // the arena PA chime: two bell tones, fed through a slapback delay so it rings like a big room
+    const d = c.createDelay(1);
+    d.delayTime.value = 0.13;
+    const fb = c.createGain(); fb.gain.value = 0.42;
+    const wet = c.createGain(); wet.gain.value = 0.6;
+    d.connect(fb); fb.connect(d); d.connect(wet); wet.connect(out);
+    const send = c.createGain(); send.gain.value = 1;
+    send.connect(out); send.connect(d);
+    tone(c, send, t, { f0: 988, dur: 0.35, vel: 0.14, attack: 0.002 });
+    tone(c, send, t + 0.16, { f0: 1319, dur: 0.5, vel: 0.12, attack: 0.002 });
+    globalThis.setTimeout(() => { try { fb.disconnect(); d.disconnect(); wet.disconnect(); send.disconnect(); } catch { /* already gone */ } }, 2500); // tidy up the feedback loop
   },
   jukebox: (c, out, t, n) => {
     burst(c, out, n, t, { filter: "highpass", f0: 2500, dur: 0.3, vel: 0.12, attack: 0.02 });

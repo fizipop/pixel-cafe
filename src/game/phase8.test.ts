@@ -353,12 +353,12 @@ test("racer: a closed circuit with pads, oil, and a sane minimum lap time", () =
   assert.equal(tr.oil.length, 4);
   assert.ok(tr.minLapMs > 4000 && tr.minLapMs < 15000, `${tr.minLapMs}`);
   assert.equal(RACE.LAPS, 4);
-  assert.equal(RACE.FIELD, 20);
+  assert.equal(RACE.FIELD, 8); // you and seven CPU racers
   const a = tr.pts[0], z = tr.pts[tr.pts.length - 1];
   assert.ok(Math.hypot(a.x - z.x, a.y - z.y) < 60, "the loop closes");
 });
 
-test("racer: a 20-car grid waits for the lights, every CPU racer finishes four laps, and positions are sorted", () => {
+test("racer: an 8-car grid waits for the lights, every CPU racer finishes four laps, and positions are sorted", () => {
   const r = newRace(3);
   const rng = mulberry32(3);
   const x0 = r.cars[0].x;

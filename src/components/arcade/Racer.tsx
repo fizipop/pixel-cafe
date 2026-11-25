@@ -12,7 +12,7 @@ const KEYS: Record<string, keyof RaceInput> = {
 const ORDINAL = ["1st", "2nd", "3rd"];
 const ord = (n: number) => ORDINAL[n - 1] ?? `${n}th`;
 
-/** Neon Drift GP: a behind-the-car 3D race against a 20-car field. Arrow keys / WASD steer, Space or Shift drifts. Your result is checked by the server. */
+/** Neon Drift GP: a behind-the-car 3D race against an 8-car field. Arrow keys / WASD steer, Space or Shift drifts. Your result is checked by the server. */
 export default function Racer({ net, onClose, sfx, announce }: ArcadeProps) {
   const annRef = useRef(announce);
   useEffect(() => { annRef.current = announce; }, [announce]);
@@ -115,7 +115,7 @@ export default function Racer({ net, onClose, sfx, announce }: ArcadeProps) {
             </div>
           )}
           {phase === "menu" && result?.err && <p className="mb-2 text-ember" role="alert">{result.err}</p>}
-          {phase === "menu" && <p className="mb-3 text-xl text-cream">Four laps from 12th on a 20-car grid, with oil slicks, turbo pads and hills. Podium finishes pay Cafe Beans (1st {raceBeans(1)}, 2nd {raceBeans(2)}, 3rd {raceBeans(3)}) and your best lap goes on the leaderboard.</p>}
+          {phase === "menu" && <p className="mb-3 text-xl text-cream">Four laps from 6th on an 8-car grid, with oil slicks, turbo pads and hills. Podium finishes pay Cafe Beans (1st {raceBeans(1)}, 2nd {raceBeans(2)}, 3rd {raceBeans(3)}) and your best lap goes on the leaderboard.</p>}
           <button className="px-btn !px-6 !py-3" disabled={busy} onClick={() => void start()}>{phase === "done" ? "Race again" : "Start the race"}</button>
           <p className="mt-3 text-sm text-latte">Free to play. Controls: W/↑ throttle, S/↓ brake, A/D or ←/→ steer, Space or Shift to drift.</p>
         </div>

@@ -3,7 +3,7 @@
 // the reported times are physically possible before paying out Cafe Beans.
 
 export const RACE = {
-  LAPS: 4, FIELD: 20, PLAYER_SLOT: 11, COUNTDOWN_MS: 3200, ROAD: 96, // road width (px); FIELD cars on the grid, you start 12th
+  LAPS: 4, FIELD: 8, PLAYER_SLOT: 5, COUNTDOWN_MS: 3200, ROAD: 96, // road width (px); FIELD cars on the grid (you + 7 CPU racers), you start 6th
   ACC: 330, BRAKE: 420, MAX: 330, BOOST_MAX: 470, DRAG: 0.7, OFF_DRAG: 3.2, TURN: 2.5,
   GRIP: 0.9, DRIFT_GRIP: 0.992, BOOST_MS: 1100, OIL_MS: 900, CAR_R: 11,
   // solid boundary: a barrier runs EDGE px either side of the centreline (past the curbs and a strip of grass run-off);
@@ -55,7 +55,7 @@ function build(): Track {
   let pts: Vec[] = [];
   const n = CONTROL.length;
   for (let i = 0; i < n; i++) for (let s = 0; s < 24; s++) pts.push(catmull(CONTROL[(i + n - 1) % n], CONTROL[i], CONTROL[(i + 1) % n], CONTROL[(i + 2) % n], s / 24));
-  pts = [...pts.slice(START_AT), ...pts.slice(0, START_AT)]; // the start/finish line sits on a long straight so the 20-car grid fits
+  pts = [...pts.slice(START_AT), ...pts.slice(0, START_AT)]; // the start/finish line sits on a long straight so the whole grid fits
   let length = 0;
   for (let i = 0; i < pts.length; i++) { const b = pts[(i + 1) % pts.length]; length += Math.hypot(b.x - pts[i].x, b.y - pts[i].y); }
   const at = (i: number, off = 0): Vec => {

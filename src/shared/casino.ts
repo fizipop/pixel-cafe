@@ -255,3 +255,12 @@ export const LOTTERY = { MIN: 1, MAX: 1000, COST: 20, JACKPOT: 10_000 } as const
 export const validLotteryNumber = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= LOTTERY.MIN && (n as number) <= LOTTERY.MAX;
 /** A fair draw: every number 1-1000 equally likely. */
 export const lotteryDraw = (rng: Rng) => LOTTERY.MIN + Math.min(LOTTERY.MAX - LOTTERY.MIN, Math.floor(rng() * (LOTTERY.MAX - LOTTERY.MIN + 1)));
+
+// ------------------------------------------------------------------ the hourly lottery
+// Same ticket (pick 1-1000, 20 beans) and the same 10,000 jackpot, but tickets go into the next draw on the hour,
+// shared by everyone in the cafe. Each ticket is settled exactly once, when its draw runs.
+export const HOURLY_MS = 60 * 60 * 1000;
+/** A player can hold at most this many tickets for any one hourly draw. */
+export const HOURLY_MAX_TICKETS = 10;
+/** The top of the next hour after `now` (the draw a ticket bought now goes into). */
+export const nextHourlyDraw = (now: number) => (Math.floor(now / HOURLY_MS) + 1) * HOURLY_MS;

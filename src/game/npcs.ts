@@ -2,7 +2,7 @@ import * as Phaser from "phaser";
 import type { NavGrid, Point } from "./pathing";
 import { SeatState, sitPose } from "./seats";
 import { privateTableOf, type Seat } from "./layout";
-import type { Bubbles } from "./bubbles";
+import type { BubbleMode, Bubbles } from "./bubbles";
 import { HeldCup, type DrinkKind } from "./heldCup";
 
 export type CrowdMood = "jackpot" | "big" | "win" | "lose";
@@ -15,7 +15,7 @@ export type NpcSpec = {
   /** barista / sitter / walker (Floor 1, original), stander (keeps to one spot), wanderer (visits waypoints in turn) */
   behavior: "barista" | "sitter" | "walker" | "stander" | "wanderer";
   /** Which floor they live on (default 1). Floor 2 NPCs use the Arcade's own path-finding grid. */
-  floor?: 1 | 2;
+  floor?: 1 | 2 | 3;
   /** Said once when the player walks up to them (then not again for a while). */
   greet?: string[];
   /** What they say when the announcer calls a result nearby. */
@@ -171,8 +171,9 @@ export class Npc {
     this.sprite = scene.add.image(this.x, this.y, `npc_${spec.id}${spec.back ? "_back" : ""}`).setOrigin(0.5, 1);
     this.sprite.setInteractive({ useHandCursor: true });
     this.sprite.on("pointerdown", () => world.onClick(this));
+    // the nameplate is the character's name only (their role lives in their dialogue, not in brackets over their head)
     this.label = scene.add
-      .text(this.x, this.y, `[${spec.tag}] ${spec.name}`, {
+      .text(this.x, this.y, spec.name, {
         fontFamily: "VT323, monospace",
         fontSize: "14px",
         color: "#d8b98a", // muted tan: NPC tags look different from player names
@@ -237,7 +238,7 @@ export class Npc {
     const line = this.spec.lines[this.lineIdx++ % this.spec.lines.length];
     const player = this.w.playerPos();
     this.sprite.setFlipX(player.x < this.x);
-    this.say(line, 4600);
+    this.say(line, 4600, "direct"); // you asked: it always shows
     this.busyUntil = this.w.scene.time.now + 4600;
     return line;
   }
@@ -246,7 +247,7 @@ export class Npc {
   receiveGift(kind: DrinkKind, line: string, loved: boolean) {
     const player = this.w.playerPos();
     if (this.mode !== "sit") this.sprite.setFlipX(player.x < this.x);
-    this.say(line, 4400);
+    this.say(line, 4400, "direct");
     this.busyUntil = this.w.scene.time.now + 4400;
     if (loved) {
       this.w.bubbles.emote(`${this.id}:fx`, () => {
@@ -258,8 +259,10 @@ export class Npc {
     this.w.scene.time.delayedCall(30_000, () => this.cup.hide());
   }
 
-  say(text: string, ms = 3600) {
-    this.w.bubbles.say(this.id, () => this.headAnchor(), text, ms);
+  /** Speak. Idle chatter, greetings and reactions are "soft" (skipped if they would overlap another bubble or the area
+   *  already has its two NPC bubbles); lines the player asked for are "direct". Returns whether it showed. */
+  say(text: string, ms = 3600, mode: BubbleMode = "soft"): boolean {
+    return this.w.bubbles.say(this.id, () => this.headAnchor(), text, ms, mode);
   }
 
   /** Pixel offset for the idle animation right now ({0,0} = still). Each NPC is phase-shifted by its id. */

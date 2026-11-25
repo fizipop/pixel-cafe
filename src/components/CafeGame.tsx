@@ -252,7 +252,7 @@ export default function CafeGame() {
     sfx.setMuted(muted);
     sfx.setEnabled(sfxOn);
     sfx.start();
-    const ann = (announcerRef.current ??= new Announcer((big) => sfxRef.current?.play(big ? "stingerBig" : "stinger")));
+    const ann = (announcerRef.current ??= new Announcer((cue) => sfxRef.current?.play(cue)));
     ann.setVolume(volume);
     ann.setMuted(muted);
     ann.setEnabled(voiceOn);

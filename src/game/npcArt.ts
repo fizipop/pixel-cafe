@@ -163,6 +163,30 @@ Object.assign(LOOKS, {
   },
 } satisfies Record<string, NpcLook>);
 
+// ---- more cafe regulars (Floor 1) and the rooftop crowd (Floor 3)
+Object.assign(LOOKS, {
+  // Ava, the student: long dark hair, round glasses, mustard cardigan
+  ava: { pal: { h: "#2a1810", s: "#e8b890", e: "#1f140d", t: "#d8a030", T: "#b08020", a: "#d8a030", p: "#4a3a5a", b: "#f4f4f4", G: "#1f140d" }, overlays: [...[3, 4, 5, 6, 7, 8, 9].flatMap((r): Overlay[] => [[r, 2, "h"], [r, 11, "h"]]), [4, 3, "sGeGGeGs"]] },
+  // Ben: short ginger hair, striped navy tee
+  ben: { pal: { h: "#c8602a", s: "#f1c8a0", e: "#1f140d", t: "#2a3a6a", T: "#1f2a50", a: "#2a3a6a", p: "#6a5a4a", b: "#3a2a1a", W: "#f4f4f4" }, overlays: [[9, 3, "WWWWWWWW"], [11, 3, "WWWWWWWW"]] },
+  // Chloe: black bob with a red clip, green dress
+  chloe: { pal: { h: "#16100c", s: "#8a5a3a", e: "#1f140d", t: "#3a8a5a", T: "#2a6a42", a: "#3a8a5a", p: "#3a8a5a", b: "#d9304a", R: "#d9304a" }, overlays: [[3, 2, "h"], [4, 2, "h"], [5, 2, "h"], [3, 11, "h"], [4, 11, "h"], [5, 11, "h"], [1, 9, "R"]] },
+  // Hana, the artist: beret, paint-flecked smock
+  hana: { pal: { h: "#4a2a1a", s: "#f1c27d", e: "#1f140d", t: "#e8e0d0", T: "#c8c0b0", a: "#e8e0d0", p: "#2a2a34", b: "#4a3222", C: "#9a2a3a", P: "#3a8bff", Q: "#f2c36b" }, overlays: [[0, 3, "CCCCCCC"], [1, 2, "CCCCCCCCC"], [9, 4, "P"], [10, 8, "Q"], [12, 5, "P"]] },
+  // Rosa, the rumour fan: grey curls, purple shawl
+  rosa: { pal: { h: "#b8b8c4", s: "#e8c4a0", e: "#1f140d", t: "#7a3a8a", T: "#5a2a6a", a: "#7a3a8a", p: "#3a2a4a", b: "#2a1a10" }, overlays: [[0, 3, "hhhhhhhh"], [1, 2, "hhhhhhhhhh"], [3, 2, "h"], [3, 11, "h"]] },
+  // Stella, the stargazer: star-print navy jacket, silver hair clip
+  stella: { pal: { h: "#e8d0a0", s: "#f6d8b8", e: "#1f140d", t: "#1f2a5a", T: "#141e44", a: "#1f2a5a", p: "#2a2a34", b: "#9fb8d8", Y: "#fff0a0" }, overlays: [...[3, 4, 5, 6].flatMap((r): Overlay[] => [[r, 2, "h"], [r, 11, "h"]]), [9, 4, "Y"], [11, 8, "Y"], [10, 6, "Y"]] },
+  // Jules, the guitarist: flannel, beanie, a guitar slung across
+  jules: { pal: { h: "#3a2a1a", s: "#c68e5b", e: "#1f140d", t: "#8a2a2a", T: "#6a1f1f", a: "#8a2a2a", p: "#2a3a5a", b: "#3a2a1a", C: "#3a5a3a", G: "#c88a3a", N: "#5a3a1a" }, overlays: [[0, 4, "CCCCCC"], [1, 3, "CCCCCCCC"], [10, 4, "GGG"], [11, 3, "GGGGG"], [9, 7, "NNN"], [8, 9, "NN"]] },
+  // Noor: hijab in teal, cream coat
+  noor: { pal: { h: "#2a8a8a", s: "#c68e5b", e: "#1f140d", t: "#e8dcc8", T: "#c8bca8", a: "#e8dcc8", p: "#3a3a46", b: "#2a1a10" }, overlays: [[3, 2, "hh"], [4, 2, "hh"], [5, 2, "hh"], [3, 10, "hh"], [4, 10, "hh"], [5, 10, "hh"], [6, 3, "hh"], [6, 9, "hh"], [7, 3, "hhhhhhhh"]] },
+  // Sam: curly hair, mustard scarf, grey coat
+  sam: { pal: { h: "#2a1a10", s: "#7a4a2a", e: "#1f140d", t: "#6a6a78", T: "#55555f", a: "#6a6a78", p: "#2a2a34", b: "#1a1a1a", Y: "#d8a030" }, overlays: [[0, 3, "h.hh.hh."], [1, 2, "hhhhhhhhhh"], [7, 3, "YYYYYYYY"], [8, 3, "Y"]] },
+  // Kaz, the photographer: bucket hat, camera on a strap
+  kaz: { pal: { h: "#16100c", s: "#f1c27d", e: "#1f140d", t: "#4a5a3a", T: "#3a4a2a", a: "#4a5a3a", p: "#c8b896", b: "#3a2a1a", C: "#c8b896", K: "#1f1f26", L: "#9fd8f0" }, overlays: [[0, 3, "CCCCCCCC"], [1, 1, "CCCCCCCCCCCC"], [8, 4, "K....."], [9, 5, "KKKK"], [10, 5, "KLLK"], [11, 5, "KKKK"]] },
+} satisfies Record<string, NpcLook>);
+
 /** The same NPC seen from behind (watching the big screen): the face becomes the back of the head. */
 export function renderNpcBackPixels(look: NpcLook): string[] {
   const back: NpcLook = {

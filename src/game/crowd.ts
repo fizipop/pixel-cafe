@@ -227,5 +227,102 @@ export function crowdSpots(seats: Seat[]): { id: string; x: number; y: number }[
   return out;
 }
 
+
+// ------------------------------------------------------------------ more cafe regulars (Floor 1)
+
+export const CAFE_REGULARS: NpcSpec[] = [
+  {
+    id: "ava", name: "Ava", tag: "Student", behavior: "sitter", home: { x: 0, y: 0 }, seatId: "t0-left", idle: "type",
+    greet: ["Hi! Sorry, finals week. Brain is 90% caffeine.", "Oh, hey. Is it bad if I've been here since opening?"],
+    lines: [
+      "Organic chemistry exam tomorrow. The molecules are winning.",
+      "This cafe is my library now. The library doesn't have matcha.",
+      "My study method: one chapter, one cookie. I'm on cookie six.",
+      "If you see me asleep on this table, wake me up at 3. Please.",
+    ],
+    ambientSay: ["Okay. Flashcards. Focus.", "Wait, that's not how mitochondria work...", "One more page."],
+  },
+  {
+    id: "ben", name: "Ben", tag: "Regular", behavior: "sitter", home: { x: 0, y: 0 }, seatId: "t4-top", idle: "gesture",
+    greet: ["Hey hey! You've got to try the cocoa here.", "Oh hi! Chloe and I are planning a road trip. Got any ideas?"],
+    lines: ["Chloe wants mountains, I want the beach. We'll probably end up at a gas station.", "I've been coming here every Saturday for a year. Mina knows my order by heart.", "Have you been upstairs? The arcade is wild."],
+    ambientSay: ["No way, really?", "Ha! That's hilarious."],
+  },
+  {
+    id: "chloe", name: "Chloe", tag: "Regular", behavior: "sitter", home: { x: 0, y: 0 }, seatId: "t4-bottom", idle: "gesture",
+    greet: ["Hi! Don't mind Ben, he's very loud before his second coffee.", "Oh, hello! Love your look."],
+    lines: ["Road trip debate update: still mountains. Always mountains.", "I write little reviews of every drink here. The macchiato has five stars.", "The rooftop at night is the best-kept secret in town."],
+    ambientSay: ["Okay, okay, listen...", "You always say that!"],
+  },
+  {
+    id: "hana", name: "Hana", tag: "Artist", behavior: "sitter", home: { x: 0, y: 0 }, seatId: "sofa-b-1", back: true, idle: "bob",
+    greet: ["Hi! I'm sketching the cafe. You might end up in it!", "Oh! Hold still... perfect pose."],
+    lines: ["I'm drawing the whole cafe in pixel art. The cat keeps moving.", "The light from that window at four o'clock is magic.", "Biscuit has posed for me twelve times. He charges in head scratches."],
+    ambientSay: ["Hmm, needs more orange.", "Almost got the jukebox right."],
+  },
+  {
+    id: "rosa", name: "Rosa", tag: "Rumour Fan", behavior: "stander", home: { x: 662, y: 122 }, face: -1, idle: "look",
+    greet: ["Psst. Have you read the rumour board today?", "Ooh, a new face! Got any gossip?"],
+    lines: ["Somebody wrote that the barista is secretly a retired DJ. I believe it.", "I come here for the coffee and stay for the rumours.", "Rumour has it the rooftop telescope can see the moon's backside. Nobody's checked."],
+    ambientSay: ["No... way.", "I KNEW it!", "Hmm, very suspicious."],
+  },
+];
+
+// ------------------------------------------------------------------ the rooftop crowd (Floor 3)
+
+const R0 = FLOOR2_X + 1280; // FLOOR3_X, without importing it twice
+
+export const ROOFTOP_CROWD: NpcSpec[] = [
+  {
+    id: "stella", name: "Stella", tag: "Stargazer", behavior: "stander", floor: 3, home: { x: R0 + 770, y: 236 }, face: 1, idle: "look",
+    greet: ["Hey! Clear sky tonight. Want a turn at the telescope?", "Shh... I think I just saw a shooting star."],
+    lines: ["That bright one isn't a star, it's Jupiter. Say hi.", "Find the Big Dipper, follow the two end stars up, and there's Polaris.", "Make a wish at the telescope. It's free, unlike the coffee."],
+    ambientSay: ["Ooh, a satellite!", "Look up, look up!", "The moon's extra bright tonight."],
+  },
+  {
+    id: "jules", name: "Jules", tag: "Guitarist", behavior: "stander", floor: 3, home: { x: R0 + 690, y: 426 }, face: -1, idle: "bob",
+    greet: ["Hey! Pull up a log. Any requests?", "Welcome to the campfire. I only know three songs, all of them bangers."],
+    lines: ["This next one's about a marshmallow that dreamed of being golden.", "Roast tip: low and slow. Patience makes perfect s'mores.", "The rooftop's got the best acoustics in the city. Pigeons agree."],
+    ambientSay: ["♪ la la la ♪", "One, two, three, four!", "Anyone know the chords to Wonderwall? Kidding."],
+  },
+  {
+    id: "noor", name: "Noor", tag: "Night Owl", behavior: "stander", floor: 3, home: { x: R0 + 290, y: 170 }, face: 1, idle: "gesture",
+    greet: ["Hi! Isn't the skyline gorgeous from up here?", "Oh, hello! We're just watching the city lights."],
+    lines: ["Sam proposed... that we get dessert after this. Romantic.", "Count the lit windows. I'm at 412.", "Come back when it rains. The lights shimmer."],
+    ambientSay: ["So pretty.", "Look, the bridge lights changed!"],
+  },
+  {
+    id: "sam", name: "Sam", tag: "Night Owl", behavior: "stander", floor: 3, home: { x: R0 + 330, y: 170 }, face: -1, idle: "gesture",
+    greet: ["Evening! Best view in town, right?", "Hey! Noor's been counting windows for an hour."],
+    lines: ["I come up here to think. Mostly about snacks.", "We take a Polaroid every time we visit. The wall is half us.", "The fire's warm and the night's young."],
+    ambientSay: ["Mmhm.", "You're not wrong."],
+  },
+  {
+    id: "kaz", name: "Kaz", tag: "Photographer", behavior: "stander", floor: 3, home: { x: R0 + 310, y: 618 }, face: -1, idle: "look",
+    greet: ["Say cheese! Kidding. Unless...?", "Hey! The photo stand takes great group shots. Grab some friends!"],
+    lines: ["Golden hour was ten minutes ago. Blue hour is just as good.", "Stand by the string lights, they make everyone look like a movie star.", "Check the Polaroid Wall. There's a photo of a pigeon that's surprisingly artistic."],
+    ambientSay: ["Ooh, nice light.", "Hold that pose!", "Click."],
+  },
+];
+
+/** Groups that chat among themselves: each step is who speaks and what they say (the others turn to look). */
+export const TALK_GROUPS: { id: string; floor: 1 | 2 | 3; members: string[]; talks: [string, string][][] }[] = [
+  { id: "crew", floor: 1, members: CREW.map((c) => c.id), talks: CREW_TALKS },
+  {
+    id: "friends", floor: 1, members: ["ben", "chloe"], talks: [
+      [["ben", "Okay, beach trip. Sun, sand, ice cream."], ["chloe", "Or mountains. Fresh air, no sand in your shoes."]],
+      [["chloe", "Have you tried the new matcha?"], ["ben", "Twice today. Don't tell Mina, she'll cut me off."]],
+      [["ben", "Did you see Togi upstairs? He was yelling at the roulette wheel."], ["chloe", "He does that. The wheel never listens."]],
+    ],
+  },
+  {
+    id: "couple", floor: 3, members: ["noor", "sam"], talks: [
+      [["noor", "Look, a shooting star!"], ["sam", "Quick, make a wish!"]],
+      [["sam", "Marshmallows or a Polaroid first?"], ["noor", "Polaroid. Then marshmallows. Then another Polaroid."]],
+      [["noor", "The city never sleeps, huh?"], ["sam", "Neither do we, apparently."]],
+    ],
+  },
+];
+
 /** Every chair an NPC sits in all day, on any floor: the server marks them all taken. */
-export const ALL_NPC_SEATS: Record<string, string> = { ...NPC_SEATS, ...CREW_SEATS, ...CROWD_SEATS };
+export const ALL_NPC_SEATS: Record<string, string> = { ...NPC_SEATS, ...CREW_SEATS, ...CROWD_SEATS, ...Object.fromEntries(CAFE_REGULARS.filter((s) => s.seatId).map((s) => [s.seatId!, `npc:${s.id}`])) };

@@ -7,7 +7,8 @@ import { Room, type Conn } from "./room.ts";
 import { MemoryRepository } from "./repository.ts";
 import { STAIRS } from "../src/shared/floors.ts";
 import { mulberry32 } from "../src/shared/arcade.ts";
-import { LOTTERY, PLINKO_ROWS, plinkoMult, plinkoRun, plinkoSlot } from "../src/shared/casino.ts";
+import { HOURLY_MAX_TICKETS, HOURLY_MS, LOTTERY, PLINKO_ROWS, nextHourlyDraw, plinkoMult, plinkoRun, plinkoSlot } from "../src/shared/casino.ts";
+import { sanitizeData } from "./repository.ts";
 
 function fake(id: string): Conn & { log: { event: string; payload: any }[] } {
   const log: { event: string; payload: any }[] = [];
@@ -28,7 +29,7 @@ function setup(rngValues: number[] = [], seed = 0) {
   };
   const call = (id: string, ev: any, d?: any) => room.arcadeEvent(id, ev, d) as any;
   const beans = (id: string) => room.arcade.wallets.balance(id);
-  return { room, add, up, call, beans };
+  return { room, add, up, call, beans, now };
 }
 
 test("plinko: the server rolls the seed, the replayed path lands in the paid slot, and the wallet moves by exactly bet and win", () => {
@@ -117,4 +118,52 @@ test("casino games only work on Floor 2", () => {
   const { add, call } = setup();
   add("a", 500);
   for (const [ev, d] of [["plinko:drop", { bet: 10, gate: 1 }], ["huff:spin", { machine: "huff", bet: 10 }], ["lottery:enter", { pick: 5 }]] as const) assert.equal(call("a", ev, d).ok, false, ev);
+});
+
+test("hourly lottery: a ticket costs 20, waits for the top of the hour, and a match pays 10,000 exactly once", () => {
+  // rng: ticket id, then the draw (0.4995 -> 500)
+  const { room, add, up, call, beans, now } = setup([0.1, 0.4995]);
+  add("a", 100); up("a");
+  const r = call("a", "lottery:hourlyBuy", { pick: 500 });
+  assert.equal(r.ok, true);
+  assert.equal(beans("a"), 80, "paid 20 up front");
+  assert.equal(r.view.mine.length, 1);
+  assert.equal(r.view.mine[0].drawAt, nextHourlyDraw(now.t));
+  room.tick();
+  assert.equal(beans("a"), 80, "nothing happens before the hour");
+  now.t = r.view.nextDrawAt + 5;
+  room.tick();
+  assert.equal(beans("a"), 80 + LOTTERY.JACKPOT, "the winning ticket paid on the hour");
+  const v = call("a", "lottery:hourly").view;
+  assert.equal(v.mine.length, 0, "the ticket was settled");
+  assert.equal(v.last.number, 500);
+  assert.deepEqual(v.last.winners, ["a"]);
+  assert.deepEqual(v.results[0], { at: r.view.nextDrawAt, number: 500, pick: 500, won: true });
+  room.tick(); now.t += HOURLY_MS; room.tick();
+  assert.equal(beans("a"), 80 + LOTTERY.JACKPOT, "never paid twice");
+});
+
+test("hourly lottery: losing tickets pay nothing, everyone shares the draw, and there's a per-draw ticket cap", () => {
+  const { room, add, up, call, beans, now } = setup([], 21);
+  add("a", 400); add("b", 400); up("a"); up("b");
+  for (let k = 0; k < HOURLY_MAX_TICKETS; k++) assert.equal(call("a", "lottery:hourlyBuy", { pick: k + 1 }).ok, true);
+  assert.equal(call("a", "lottery:hourlyBuy", { pick: 99 }).ok, false, "capped");
+  assert.equal(call("b", "lottery:hourlyBuy", { pick: 1000 }).ok, true);
+  for (const bad of [0, 1001, 2.5, "7"]) assert.equal(call("b", "lottery:hourlyBuy", { pick: bad }).ok, false);
+  const before = { a: beans("a"), b: beans("b") };
+  now.t = nextHourlyDraw(now.t) + 1;
+  room.tick();
+  const v = call("a", "lottery:hourly").view;
+  assert.equal(v.last.tickets, HOURLY_MAX_TICKETS + 1, "one shared draw for everyone");
+  const n = v.last.number;
+  const aWins = n >= 1 && n <= HOURLY_MAX_TICKETS ? 1 : 0, bWins = n === 1000 ? 1 : 0;
+  assert.equal(beans("a"), before.a + aWins * LOTTERY.JACKPOT);
+  assert.equal(beans("b"), before.b + bWins * LOTTERY.JACKPOT);
+});
+
+test("hourly lottery: pending tickets are saved with the cafe data (a restart never loses one)", () => {
+  const raw = JSON.parse(JSON.stringify({ lotteryTickets: [{ id: "t1", clientId: "a", name: "Ann", pick: 42, drawAt: 3600000, boughtAt: 1 }, { id: "bad", clientId: "a", name: "Ann", pick: 5000, drawAt: 1 }], lotteryDraws: [{ at: 1, number: 7, entries: [{ clientId: "a", name: "Ann", pick: 7, won: false }] }] }));
+  const d = sanitizeData(raw);
+  assert.deepEqual(d.lotteryTickets.map((t) => t.id), ["t1"], "malformed tickets are dropped");
+  assert.equal(d.lotteryDraws[0].entries[0].won, true, "a result is recomputed from the numbers, not trusted from disk");
 });

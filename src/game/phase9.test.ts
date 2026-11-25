@@ -1,4 +1,4 @@
-// Floor 2 arcade polish: Pixel Fighter II controls, the 20-car Neon Drift field, Beat Battle difficulty levels, and Miniclip-style 8-ball rules.
+// Floor 2 arcade polish: Pixel Fighter II controls, the Neon Drift field, Beat Battle difficulty levels, and Miniclip-style 8-ball rules.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { BTN, CHARACTERS, FIGHT, METER_MAX, newMatch, stepMatch, type FightMatch } from "../shared/fighter.ts";
@@ -64,7 +64,7 @@ test("fighter controls: trading blows fills the super meter, and a full meter po
 
 // ------------------------------------------------------------------ Neon Drift GP
 
-test("racer: a 20-car grid on the road, you start mid-pack, and the hills are scenery only", () => {
+test("racer: an 8-car grid on the road, you start mid-pack, and the hills are scenery only", () => {
   const r = newRace(9), tr = track();
   assert.equal(r.cars.length, RACE.FIELD);
   assert.equal(new Set(r.cars.map((c) => c.id)).size, RACE.FIELD);
@@ -74,7 +74,8 @@ test("racer: a 20-car grid on the road, you start mid-pack, and the hills are sc
   }
   for (let i = 0; i < r.cars.length; i++) for (let j = i + 1; j < r.cars.length; j++) assert.ok(Math.hypot(r.cars[i].x - r.cars[j].x, r.cars[i].y - r.cars[j].y) >= RACE.CAR_R * 2, "no overlaps on the grid");
   const start = positions(r)[0];
-  assert.ok(start >= 10 && start <= 13, `you roll off ${start}th`);
+  assert.equal(r.cars.length, 8, "1 player + 7 CPU racers");
+  assert.ok(start >= 5 && start <= 7, `you roll off mid-pack, ${start}th`);
   assert.equal(new Set(r.cars.slice(1).map((c) => c.lane)).size > 4, true, "the CPU cars use different lanes");
   const n = tr.pts.length;
   const zs = Array.from({ length: n }, (_, i) => elevation(i, n));

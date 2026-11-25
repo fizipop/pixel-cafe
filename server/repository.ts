@@ -24,6 +24,10 @@ export const LOWER_IS_BETTER: Record<BoardId, boolean> = { penguin: false, moon:
 /** Floor 3: an anonymous star wish (`author` is the device id, used only to rate limit and mark "mine"). */
 export type WishRecord = { id: string; text: string; ts: number; author: string };
 /** Floor 3: one group Polaroid pinned to the Rooftop Polaroid Wall (sprites are stored run-length packed). */
+/** An hourly lottery ticket waiting for its draw (removed once settled). */
+export type LotteryTicketRecord = { id: string; clientId: string; name: string; pick: number; drawAt: number; boughtAt: number };
+/** A finished hourly draw, with every ticket that was in it. */
+export type LotteryDrawRecord = { at: number; number: number; entries: { clientId: string; name: string; pick: number; won: boolean }[] };
 export type PolaroidRecord = { id: string; ts: number; by: string; people: { name: string; sprite: PackedSprite }[] };
 
 export interface Repository {
@@ -58,6 +62,11 @@ export interface Repository {
   removeWishesBefore(ts: number): void;
   listPolaroids(): PolaroidRecord[];
   addPolaroid(p: PolaroidRecord, cap: number): void;
+  // the hourly lottery: pending tickets and recent draws
+  listLotteryTickets(): LotteryTicketRecord[];
+  setLotteryTickets(t: LotteryTicketRecord[]): void;
+  listLotteryDraws(): LotteryDrawRecord[];
+  addLotteryDraw(d: LotteryDrawRecord, cap: number): void;
   /** Write anything pending to durable storage (no-op for memory). */
   flush(): void;
 }
@@ -78,11 +87,13 @@ export type PersistedData = {
   fighter: Record<string, ScoreRecord>;
   wishes: WishRecord[];
   polaroids: PolaroidRecord[];
+  lotteryTickets: LotteryTicketRecord[];
+  lotteryDraws: LotteryDrawRecord[];
 };
 
 export const emptyData = (): PersistedData => ({
   version: 1, rumours: [], rumourLikes: {}, guestbook: [], guestbookDays: {}, outfits: {}, votes: [],
-  wallets: {}, penguin: {}, moon: {}, drift: {}, beat: {}, fighter: {}, wishes: [], polaroids: [],
+  wallets: {}, penguin: {}, moon: {}, drift: {}, beat: {}, fighter: {}, wishes: [], polaroids: [], lotteryTickets: [], lotteryDraws: [],
 });
 
 const isStr = (v: unknown): v is string => typeof v === "string";
@@ -138,6 +149,16 @@ export function sanitizeData(raw: unknown): PersistedData {
     const people: PolaroidRecord["people"] = [];
     for (const q of p.people) if (isObj(q) && isStr(q.name) && isPackedSprite(q.sprite)) people.push({ name: q.name, sprite: q.sprite });
     if (people.length > 0 && people.length <= 6) out.polaroids.push({ id: p.id, ts: p.ts, by: p.by, people });
+  }
+  const isPick = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= 1 && (n as number) <= 1000;
+  for (const t of list(raw.lotteryTickets)) {
+    if (isObj(t) && isStr(t.id) && isStr(t.clientId) && isStr(t.name) && isPick(t.pick) && isNum(t.drawAt)) out.lotteryTickets.push({ id: t.id, clientId: t.clientId, name: t.name, pick: t.pick, drawAt: t.drawAt, boughtAt: isNum(t.boughtAt) ? t.boughtAt : 0 });
+  }
+  for (const d of list(raw.lotteryDraws)) {
+    if (!isObj(d) || !isNum(d.at) || !isPick(d.number)) continue;
+    const entries: LotteryDrawRecord["entries"] = [];
+    for (const e of list(d.entries)) if (isObj(e) && isStr(e.clientId) && isStr(e.name) && isPick(e.pick)) entries.push({ clientId: e.clientId, name: e.name, pick: e.pick, won: e.pick === d.number });
+    out.lotteryDraws.push({ at: d.at, number: d.number, entries });
   }
   return out;
 }
@@ -236,6 +257,14 @@ export class MemoryRepository implements Repository {
   addPolaroid(p: PolaroidRecord, cap: number) {
     this.data.polaroids.unshift(p);
     if (this.data.polaroids.length > cap) this.data.polaroids.length = cap;
+    this.changed();
+  }
+  listLotteryTickets() { return this.data.lotteryTickets; }
+  setLotteryTickets(t: LotteryTicketRecord[]) { this.data.lotteryTickets = t; this.changed(); }
+  listLotteryDraws() { return this.data.lotteryDraws; }
+  addLotteryDraw(d: LotteryDrawRecord, cap: number) {
+    this.data.lotteryDraws.unshift(d);
+    if (this.data.lotteryDraws.length > cap) this.data.lotteryDraws.length = cap;
     this.changed();
   }
 

@@ -543,7 +543,7 @@ test("neon drift: a result is only believed if the lap times are possible and th
   assert.equal(run("a", { bestLapMs: min - 1 }).res.ok, false, "faster than the track allows");
   assert.equal(run("a", { totalMs: min * 2 }).res.ok, false, "three laps can't take less than three minimum laps");
   assert.equal(run("a", { bestLapMs: total }).res.ok, false, "best lap can't be longer than the average lap");
-  assert.equal(run("a", { position: RACE.FIELD + 1 }).res.ok, false, "only a 20-car field");
+  assert.equal(run("a", { position: RACE.FIELD + 1 }).res.ok, false, "only an 8-car field");
   assert.equal(run("a", { position: 0 }).res.ok, false);
   assert.equal(run("a", { totalMs: 1.5 }).res.ok, false);
   assert.equal(run("a", {}, 1000).res.ok, false, "finished faster than real time");

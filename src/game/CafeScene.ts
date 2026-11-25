@@ -23,9 +23,9 @@ import { buildRooftopTextures } from "./rooftopArt";
 import { buildRooftopFloor } from "./rooftopFloor";
 import { PHOTO_STAND, POLAROID_WALL, TELESCOPE, isFireSeat, type RooftopGame } from "./rooftopLayout";
 import { ARCADE_H, MACHINES, ROULETTE_WATCH, TABLE_GAME, TABLE_NAME, arcadeSeatInfo, arcadeSolids, arcadeWalls, isRigSeat, type ArcadeGame, type Machine } from "./arcadeLayout";
-import { STAIRS, WORLD_TOTAL_H, WORLD_TOTAL_W, floorBounds, type Floor } from "@/shared/floors";
+import { FLOOR2_X, FLOOR3_X, STAIRS, WORLD_TOTAL_H, WORLD_TOTAL_W, floorBounds, type Floor } from "@/shared/floors";
 import { buildCasinoTextures } from "./casinoArt";
-import { ARCADE_CROWD, CREW, CREW_TALKS, crewTablePos } from "./crowd";
+import { ARCADE_CROWD, CAFE_REGULARS, CREW, ROOFTOP_CROWD, TALK_GROUPS } from "./crowd";
 import type { CrowdMood } from "./npcs";
 import { WeatherLayer } from "./weather";
 import { Cat } from "./cat";
@@ -67,6 +67,11 @@ const MACHINE_RANGE = 40;
 const STAIRS_RANGE = 46;
 const ROOF_RANGE = 44; // telescope / photo stand / Polaroid Wall prompts
 const CUP_MS = 60_000;
+/** The camera may scroll this far above a floor's back wall, so the HUD's top bar sits over a dark "ceiling" band
+ *  instead of covering what hangs on the wall (the sports lounge's big screen and its sign, the cabinet marquees). */
+export const CAM_TOP = 64;
+/** How far above the player the camera centres (world px). */
+export const CAM_LOOK_UP = 64;
 
 const PLANTS: [number, number][] = [
   [62, 740], [962, 740], [962, 150], [456, 168], [452, 726], [580, 726], [662, 372],
@@ -190,8 +195,11 @@ export class CafeScene extends Phaser.Scene {
 
     const cam = this.cameras.main;
     cam.setZoom(2);
-    cam.setBounds(0, 0, WORLD_W, WORLD_H); // Floor 1; changeFloor() moves this to the floor you travel to
+    cam.setBounds(0, -CAM_TOP, WORLD_W, WORLD_H + CAM_TOP); // Floor 1; changeFloor() moves this to the floor you travel to
+    // the ceiling band above each floor (what the camera shows behind the HUD's top bar)
+    for (const [x0, col] of [[0, 0x140d08], [FLOOR2_X, 0x0a0716], [FLOOR3_X, 0x0b1020]] as const) this.add.rectangle(x0, -CAM_TOP, WORLD_W, CAM_TOP, col).setOrigin(0).setDepth(0);
     cam.startFollow(this.hitbox, true, 0.12, 0.12);
+    cam.setFollowOffset(0, CAM_LOOK_UP); // frame a little above you: wall-mounted things (the lounge screen) clear the top bar
     cam.roundPixels = true;
 
     this.keys = this.input.keyboard!.addKeys(
@@ -380,8 +388,8 @@ export class CafeScene extends Phaser.Scene {
     this.place("laptop_side", x + 6, y + 24).setDepth(y + 57); // Puneet's (left)
     this.place("laptop_side", x + 52, y + 24, true).setDepth(y + 57); // Cris's (right)
     this.place("tent_card", x + 40, y + 14).setDepth(y + 57);
-    this.add.text(x + 32, y - 18, "Pixel Restaurant HQ", { fontFamily: "VT323, monospace", fontSize: "12px", color: "#e8a070", stroke: "#1f140d", strokeThickness: 2 })
-      .setOrigin(0.5, 1).setResolution(3).setAlpha(0.8).setDepth(y + 2);
+    this.add.text(x + 32, y + 104, "Pixel Restaurant HQ", { fontFamily: "VT323, monospace", fontSize: "12px", color: "#e8a070", stroke: "#1f140d", strokeThickness: 2 })
+      .setOrigin(0.5, 1).setResolution(3).setAlpha(0.8).setDepth(y + 2); // below the table, clear of the crew's nameplates
   }
 
   private lamp(cx: number, tableY: number) {
@@ -424,7 +432,7 @@ export class CafeScene extends Phaser.Scene {
       playerPos: () => ({ x: this.hitbox.x, y: this.hitbox.y }),
       onClick: (npc) => this.onNpcClick(npc),
     };
-    const floor1 = [...NPC_SPECS, ...CREW].map((spec) => new Npc(spec, world));
+    const floor1 = [...NPC_SPECS, ...CREW, ...CAFE_REGULARS].map((spec) => new Npc(spec, world));
     world.others = () => floor1;
     // Floor 2 has its own path-finding grid built from the Arcade's furniture, so the crowd walks around machines,
     // tables, rigs and couches instead of through them
@@ -432,36 +440,39 @@ export class CafeScene extends Phaser.Scene {
     const world2: NpcWorld = { ...world, nav: nav2 };
     this.arcadeCrowd = ARCADE_CROWD.map((spec) => new Npc(spec, world2));
     world2.others = () => this.arcadeCrowd;
-    this.npcs = [...floor1, ...this.arcadeCrowd];
+    // the rooftop has its own people (they stay at their spots, so they share Floor 1's grid just for the bookkeeping)
+    const floor3 = ROOFTOP_CROWD.map((spec) => new Npc(spec, world));
+    this.npcs = [...floor1, ...this.arcadeCrowd, ...floor3];
     this.barista = this.npcs.find((n) => n.spec.id === "mina")!;
-    this.crew = this.npcs.filter((n) => CREW.some((c) => c.id === n.spec.id));
-    this.nextCrewTalk = this.time.now + 6000;
+    this.talks = TALK_GROUPS.map((g) => ({ ...g, people: this.npcs.filter((n) => g.members.includes(n.spec.id)), next: this.time.now + 5000 + Math.random() * 6000, idx: Math.floor(Math.random() * g.talks.length) }));
   }
 
   private arcadeCrowd: Npc[] = [];
-  private crew: Npc[] = [];
-  private nextCrewTalk = 0;
-  private crewTalkIdx = Math.floor(Math.random() * CREW_TALKS.length);
+  private talks: ((typeof TALK_GROUPS)[number] & { people: Npc[]; next: number; idx: number })[] = [];
 
-  /** Every so often the crew talks shop: each line in turn, and the others turn to look at whoever is speaking. */
-  private updateCrewTalk(time: number) {
-    if (time < this.nextCrewTalk || this.crew.length < 4) return;
+  /**
+   * Every so often each group (the crew, the friends, the rooftop couple) chats: each line in turn, the others turn to
+   * look at whoever is speaking, and their idle chatter is held back so the conversation never piles up bubbles.
+   */
+  private updateGroupTalks(time: number) {
     const p = { x: this.hitbox.x, y: this.hitbox.y };
-    const t = crewTablePos();
-    const talking = Math.hypot(p.x - (t.x + 32), p.y - (t.y + 30)) < 40; // the player is right there chatting: let them
-    this.nextCrewTalk = time + (talking ? 6000 : 14000 + Math.random() * 10000);
-    if (talking) return;
-    const script = CREW_TALKS[this.crewTalkIdx++ % CREW_TALKS.length];
-    for (const n of this.crew) n.hold(script.length * 2700 + 600); // no idle chatter over the conversation
-    script.forEach(([who, line], k) => {
-      this.time.delayedCall(k * 2700, () => {
-        const speaker = this.crew.find((n) => n.spec.id === who);
-        if (!speaker) return;
-        speaker.say(line, 2600); // (say() bypasses the hold: only idle chatter is held back)
-        for (const n of this.crew) if (n !== speaker) n.lookAt(speaker.x, 2700);
+    for (const g of this.talks) {
+      if (g.floor !== this.floor || time < g.next || g.people.length < g.members.length) continue;
+      const talking = g.people.some((n) => Math.hypot(p.x - n.x, p.y - n.y) < 44); // the player is chatting with them: let them
+      g.next = time + (talking ? 6000 : 14000 + Math.random() * 10000);
+      if (talking) continue;
+      const script = g.talks[g.idx++ % g.talks.length];
+      for (const n of g.people) n.hold(script.length * 2700 + 600);
+      script.forEach(([who, line], k) => {
+        this.time.delayedCall(k * 2700, () => {
+          const speaker = g.people.find((n) => n.spec.id === who);
+          if (!speaker) return;
+          speaker.say(line, 2600, "direct"); // a scripted line: shown (the held-back idle chatter is what gives way)
+          for (const n of g.people) if (n !== speaker) n.lookAt(speaker.x, 2700);
+        });
       });
-    });
-    this.nextCrewTalk = Math.max(this.nextCrewTalk, time + script.length * 2700 + 4000);
+      g.next = Math.max(g.next, time + script.length * 2700 + 4000);
+    }
   }
 
   /** The announcer called a result: arcade NPCs near the player react (Togi reacts to anything he can hear). */
@@ -556,7 +567,7 @@ export class CafeScene extends Phaser.Scene {
     this.net?.sendDrink(kind);
     this.cupUntil = this.time.now + CUP_MS;
     this.bubbles.emote("player", this.playerHead, "emote_coffee", 3000);
-    this.barista.say(BARISTA_REACTION[rating], 3400);
+    this.barista.say(BARISTA_REACTION[rating], 3400, "direct");
     const beans = beansFor(rating);
     this.cb()?.onBeans(beans, true);
     this.floatText(`+${beans} beans`);
@@ -759,7 +770,7 @@ export class CafeScene extends Phaser.Scene {
     body.reset(x, y);
     const b = floorBounds(floor);
     const cam = this.cameras.main;
-    cam.setBounds(b.x, b.y, b.w, b.h);
+    cam.setBounds(b.x, b.y - CAM_TOP, b.w, b.h + CAM_TOP);
     cam.centerOn(x, y);
     cam.fadeIn(350, 12, 8, 24);
     this.lastSent = { x: -1, y: -1, flip: false, moving: false, t: 0 };
@@ -885,7 +896,7 @@ export class CafeScene extends Phaser.Scene {
     this.bubbles.update(time);
     // NPCs only think when the player is on their floor (a hidden floor costs nothing)
     for (const npc of this.npcs) if ((npc.spec.floor ?? 1) === this.floor || npc.spec.behavior === "barista") npc.update(time, delta);
-    if (this.floor === 1) this.updateCrewTalk(time);
+    this.updateGroupTalks(time);
     this.cat.update(time, delta);
     this.weather.update(delta);
     for (const r of this.remotes.values()) r.update(time, delta);
@@ -992,7 +1003,7 @@ export class CafeScene extends Phaser.Scene {
     const theo = this.npcs.find((n) => `npc:${n.spec.id}` === GAME_NPC);
     if (!theo || (t.players.X !== GAME_NPC && t.players.O !== GAME_NPC)) return; // only when Theo was playing
     const mine = t.winner !== "draw" && t.players[t.winner] === GAME_NPC;
-    theo.say(t.winner === "draw" ? "A draw! Again?" : mine ? "Ha! Got you. Rematch?" : "Well played! You got me.", 3600);
+    theo.say(t.winner === "draw" ? "A draw! Again?" : mine ? "Ha! Got you. Rematch?" : "Well played! You got me.", 3600, "direct");
   }
 
   private startJukeboxNotes() {

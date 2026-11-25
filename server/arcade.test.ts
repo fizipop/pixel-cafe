@@ -600,7 +600,8 @@ test("real sockets: floors scope broadcasts, arcade acks work (with and without 
     const board = await a.timeout(2000).emitWithAck("arcade:board");
     assert.equal(board.ok, true);
     assert.equal(board.view.rich.length, 2);
-    const walletMsg = waitFor<any>(a, "wallet", (w) => w.beans < 100);
+    // any change from 100 (a pair leaves 95, three of a kind 160+): waiting for "< 100" timed out on the ~7.6% of spins that win big
+    const walletMsg = waitFor<any>(a, "wallet", (w) => w.beans !== 100);
     const spin = await a.timeout(2000).emitWithAck("slots:spin", { bet: 10 });
     assert.equal(spin.ok, true);
     assert.equal(spin.reels.length, 3);

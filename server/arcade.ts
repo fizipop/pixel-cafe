@@ -8,6 +8,7 @@ import { fail, type EngineCtx, type Who } from "./arcadeTypes.ts";
 import { BlackjackEngine } from "./blackjack.ts";
 import { CrashEngine } from "./crash.ts";
 import { FighterEngine } from "./fighter.ts";
+import { HourlyLottery } from "./lottery.ts";
 import { PokerEngine } from "./poker.ts";
 import { PoolEngine } from "./pool.ts";
 import { LOWER_IS_BETTER, type BoardId, type Repository } from "./repository.ts";
@@ -35,6 +36,7 @@ export class Arcade {
   readonly poker: PokerEngine;
   readonly pool: PoolEngine;
   readonly fighter: FighterEngine;
+  readonly hourly: HourlyLottery;
 
   private repo: Repository;
   private host: ArcadeHost;
@@ -45,6 +47,7 @@ export class Arcade {
     this.wallets = new Wallets(repo, host.now);
     const ctx: EngineCtx = { now: host.now, rng: host.rng, wallets: this.wallets, touch: (id) => this.pushWallet(id) };
     this.solo = new SoloGames(ctx, repo);
+    this.hourly = new HourlyLottery(ctx, repo);
     this.crash = new CrashEngine(ctx, () => this.pushCrash(), (who, mult) => this.recordMoon(who, mult));
     this.roulette = new RouletteEngine(ctx, () => this.pushRoulette());
     this.blackjack = new BlackjackEngine(ctx, () => this.pushBlackjack());
@@ -131,6 +134,8 @@ export class Arcade {
       case "plinko:drop": return this.solo.plinko(w, x.bet, x.gate);
       case "huff:spin": return this.solo.huff(w, x.machine, x.bet);
       case "lottery:enter": return this.solo.lottery(w, x.pick);
+      case "lottery:hourly": return { ok: true, view: this.hourly.view(w.clientId) };
+      case "lottery:hourlyBuy": return this.hourly.buy(w, x.pick);
       case "mines:state": return this.solo.minesState(w);
       case "mines:start": return this.solo.minesStart(w, x.bet, x.mines);
       case "mines:reveal": return this.solo.minesReveal(w, x.tile);
@@ -171,6 +176,7 @@ export class Arcade {
   }
 
   tick(now: number) {
+    this.hourly.tick(now); // the hourly lottery draws on the hour (settling each ticket once)
     this.crash.tick(now);
     this.roulette.tick(now);
     this.blackjack.tick(now);

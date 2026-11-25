@@ -97,6 +97,13 @@ export type SlotsResult = { reels: SlotSymbol[]; mult: number; win: number; bean
 export type PlinkoResult = { seed: number; gate: PlinkoGate; path: (-1 | 1)[]; slot: number; mult: number; win: number; beans: number };
 export type HuffResultMsg = HuffResult & { machine: HuffMachine; bet: number; beans: number };
 export type LotteryResult = { ticket: number; pick: number; draw: number; won: boolean; win: number; beans: number };
+/** The hourly draw: when the next one runs (server clock), your tickets waiting for it, the last draw and your results. */
+export type HourlyLotteryView = {
+  now: number; nextDrawAt: number; maxTickets: number;
+  mine: { id: string; pick: number; drawAt: number }[];
+  last: { at: number; number: number; tickets: number; winners: string[] } | null;
+  results: { at: number; number: number; pick: number; won: boolean }[];
+};
 
 export type MinesView = {
   active: boolean;
@@ -281,6 +288,8 @@ export interface ClientToServer {
   "plinko:drop": (p: { bet: number; gate: number }, ack: (r: Ack<PlinkoResult>) => void) => void;
   "huff:spin": (p: { machine: HuffMachine; bet: number }, ack: (r: Ack<HuffResultMsg>) => void) => void;
   "lottery:enter": (p: { pick: number }, ack: (r: Ack<LotteryResult>) => void) => void;
+  "lottery:hourly": (ack: (r: Ack<{ view: HourlyLotteryView }>) => void) => void;
+  "lottery:hourlyBuy": (p: { pick: number }, ack: (r: Ack<{ view: HourlyLotteryView }>) => void) => void;
   "mines:state": (ack: (r: Ack<{ view: MinesView }>) => void) => void; // pick up a round you left running
   "mines:start": (p: { bet: number; mines: number }, ack: (r: Ack<{ view: MinesView }>) => void) => void;
   "mines:reveal": (p: { tile: number }, ack: (r: Ack<{ view: MinesView }>) => void) => void;
@@ -332,7 +341,7 @@ export type RooftopEvent = (typeof ROOFTOP_EVENTS)[number];
 
 /** The arcade requests the server routes to the Arcade class (see server/arcade.ts). */
 export const ARCADE_EVENTS = [
-  "slots:spin", "plinko:drop", "huff:spin", "lottery:enter", "mines:state", "mines:start", "mines:reveal", "mines:cashout", "crash:join", "crash:leave", "crash:bet", "crash:cashout",
+  "slots:spin", "plinko:drop", "huff:spin", "lottery:enter", "lottery:hourly", "lottery:hourlyBuy", "mines:state", "mines:start", "mines:reveal", "mines:cashout", "crash:join", "crash:leave", "crash:bet", "crash:cashout",
   "roulette:join", "roulette:leave", "roulette:bet", "roulette:clear", "bj:bet", "bj:hit", "bj:stand", "bj:double",
   "penguin:state", "penguin:start", "penguin:step", "penguin:cashout", "pk:buyin", "pk:act", "pk:bot",
   "pl:start", "pl:accept", "pl:shot", "pl:resign", "fg:join", "fg:cancel", "fg:input",

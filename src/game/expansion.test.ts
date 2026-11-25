@@ -5,13 +5,16 @@ import assert from "node:assert/strict";
 import {
   ARCADE_H, BIG_SCREEN, DANCE_PADS, LOUNGE_SOFAS, MACHINES, RIG, RIGS, ROULETTE, arcadeSeats, arcadeSolids, arcadeWalls, loungeSeats, rigSeats,
 } from "./arcadeLayout.ts";
-import { ARCADE_CROWD, ALL_NPC_SEATS, CREW, CREW_TABLE, CREW_TALKS, crowdSpots } from "./crowd.ts";
+import { ARCADE_CROWD, ALL_NPC_SEATS, CAFE_REGULARS, CREW, CREW_TABLE, CREW_TALKS, ROOFTOP_CROWD, TALK_GROUPS, crowdSpots } from "./crowd.ts";
 import { buildSeats } from "./layout.ts";
 import { LOOKS, renderNpcBackPixels, renderNpcPixels } from "./npcArt.ts";
 import { NavGrid } from "./pathing.ts";
 import { FLOOR2_X, STAIRS, WORLD_TOTAL_H, WORLD_TOTAL_W, clampToFloor, floorBounds } from "../shared/floors.ts";
 import { PITCH, newMatch, stepMatch } from "./sportsSim.ts";
-import { AnnounceQueue, LINE_PRIORITY, moodOf } from "../lib/announcer.ts";
+import { AnnounceQueue, LINE_PRIORITY, PHRASING, SHOW_CUES, hitAtMs, moodOf, performanceMs, pickVoice } from "../lib/announcer.ts";
+import { SFX_NAMES } from "../lib/sfx.ts";
+import { NPC_BUBBLE_CAP, bubblesOverlap, roomFor, type LiveBubble } from "./bubbleRules.ts";
+import { FIREPIT, PHOTO_STAND, POLAROID_WALL, TELESCOPE, rooftopSeats, rooftopSolids } from "./rooftopLayout.ts";
 import { CLEAR_MAX, groundClearance } from "../shared/racer.ts";
 import { RACE, track } from "../shared/racer.ts";
 
@@ -154,4 +157,79 @@ test("neon drift terrain: the ground beside each road sample is clamped to that 
   }
   assert.ok(insideHairpin < RACE.EDGE, "the inside of the tightest hairpin is clamped inside the barrier line");
   assert.ok(open > n / 2, "open country stays wide open");
+});
+
+// ------------------------------------------------------------------ polish pass
+
+test("speech bubbles: never overlap, at most two NPC bubbles per area, and what you asked for always shows", () => {
+  const b = (owner: string, x: number, y: number, born = 0, emote = false): LiveBubble => ({ owner, x, y, w: 100, h: 30, born, emote });
+  const r = { x: 100, y: 100, w: 100, h: 30 };
+  assert.equal(bubblesOverlap(r, { x: 150, y: 100, w: 100, h: 30 }), true);
+  assert.equal(bubblesOverlap(r, { x: 210, y: 100, w: 100, h: 30 }), false, "side by side with a gap");
+  assert.equal(bubblesOverlap(r, { x: 100, y: 140, w: 100, h: 30 }), false, "one above the other with a gap");
+  // idle chatter gives way: no room, no bubble
+  assert.deepEqual(roomFor("npc:a", r, "soft", [b("npc:b", 140, 100)]), { ok: false, clear: [] });
+  // the cap: two NPC bubbles in the area already, even far enough apart, means a third waits
+  assert.equal(roomFor("npc:c", r, "soft", [b("npc:a", 260, 100), b("npc:b", 100, 220)]).ok, false);
+  assert.equal(roomFor("npc:c", r, "soft", [b("npc:a", 260, 100)]).ok, true);
+  // a line you asked for clears the NPC bubble in its way, and the oldest one if the area is full
+  const d = roomFor("npc:c", r, "direct", [b("npc:a", 130, 100, 5), b("npc:b", 300, 300, 1), b("npc:x", 330, 100, 9)]);
+  assert.equal(d.ok, true);
+  assert.ok(d.clear.includes("npc:a"), "the overlapping one goes");
+  assert.equal(d.clear.length, 2, "and one more, so only two NPC bubbles remain");
+  // an NPC never talks over a player's own words
+  assert.equal(roomFor("npc:a", r, "direct", [b("player", 120, 100)]).ok, false);
+  assert.equal(NPC_BUBBLE_CAP, 2);
+});
+
+test("nameplates: NPCs show their name only (no bracketed roles)", async () => {
+  const src = await import("node:fs").then((fs) => fs.readFileSync(new URL("./npcs.ts", import.meta.url), "utf8"));
+  assert.match(src, /\.text\(this\.x, this\.y, spec\.name,/);
+  assert.doesNotMatch(src, /\[\$\{spec\.tag\}\]/);
+});
+
+test("more cafe regulars and a rooftop crowd: placed clear of every interaction spot, seats reserved", () => {
+  const seats = buildSeats(), ids = new Set(seats.map((s) => s.id));
+  for (const s of CAFE_REGULARS) if (s.seatId) { assert.ok(ids.has(s.seatId), s.seatId); assert.equal(ALL_NPC_SEATS[s.seatId], `npc:${s.id}`); }
+  assert.ok(CAFE_REGULARS.length >= 5);
+  const roofSolids = rooftopSolids(STAIRS[3].solid);
+  const roofSpots = [TELESCOPE.spot, PHOTO_STAND.spot, POLAROID_WALL.spot, FIREPIT.spot, STAIRS[3].spot, ...rooftopSeats().map((s) => s.exit)];
+  assert.ok(ROOFTOP_CROWD.length >= 4);
+  for (const s of ROOFTOP_CROWD) {
+    assert.equal(s.floor, 3);
+    const p = s.home;
+    for (const box of roofSolids) assert.ok(!(p.x > box.x - 8 && p.x < box.x + box.w + 8 && p.y > box.y - 6 && p.y < box.y + box.h + 6), `${s.id} stands in furniture`);
+    for (const q of roofSpots) assert.ok(Math.hypot(q.x - p.x, q.y - p.y) >= 30, `${s.id} blocks a spot`);
+    assert.ok(s.lines.length >= 3 && s.greet?.length);
+    assert.ok(LOOKS[s.id], `${s.id} has a look`);
+  }
+  for (const g of TALK_GROUPS) for (const t of g.talks) for (const [who] of t) assert.ok(g.members.includes(who), `${g.id}: ${who}`);
+});
+
+test("announcer: picks a natural voice over robotic ones, and every line has a phrasing and a show cue", () => {
+  const voices = [
+    { name: "eSpeak English", lang: "en-US" }, { name: "Microsoft David - English (United States)", lang: "en-US", localService: true },
+    { name: "Microsoft Guy Online (Natural) - English (United States)", lang: "en-US", localService: false },
+    { name: "Google français", lang: "fr-FR" }, { name: "Google US English", lang: "en-US", localService: false },
+  ];
+  assert.equal(pickVoice(voices)!.name, "Microsoft Guy Online (Natural) - English (United States)");
+  assert.equal(pickVoice(voices.filter((v) => !/Natural/.test(v.name)))!.name, "Google US English");
+  assert.equal(pickVoice([{ name: "Zarvox", lang: "en-US" }]), null, "a novelty voice is worse than no voice");
+  assert.equal(pickVoice([{ name: "Google français", lang: "fr-FR" }]), null);
+  for (const line of Object.keys(LINE_PRIORITY) as (keyof typeof LINE_PRIORITY)[]) {
+    const ph = PHRASING[line], cue = SHOW_CUES[line];
+    assert.ok(ph?.length >= 1 && cue, line);
+    for (const p of ph) { assert.ok(p.text.trim().length > 0); assert.ok(p.pitch >= 0 && p.pitch <= 2 && p.rate >= 0.1 && p.rate <= 10, line); }
+    assert.ok(hitAtMs(line) < performanceMs(line), `${line}: the payoff lands inside the performance`);
+    if (LINE_PRIORITY[line] === 3 && moodOf(line) !== "neutral") assert.ok(cue.hit.length > 0, `${line}: a big moment gets a fanfare or crowd`);
+  }
+  // the payoff word is delivered higher than the build-up
+  for (const line of ["JACKPOT!", "ROUND ONE! FIGHT!", "HUFF AND PUFF BONUS!", "NEW RECORD!"] as const) {
+    const ph = PHRASING[line];
+    assert.ok(ph[ph.length - 1].pitch > ph[0].pitch, line);
+  }
+  assert.ok(SHOW_CUES["JACKPOT!"].pre.includes("drumroll"));
+  assert.ok(SHOW_CUES["BETTER LUCK NEXT TIME!"].hit.includes("crowdAww"));
+  assert.match(PHRASING["BETTER LUCK NEXT TIME!"].map((p) => p.text).join(" "), /so close/i);
+  assert.ok(SFX_NAMES.includes("fanfareBig") && SFX_NAMES.includes("drumroll") && SFX_NAMES.includes("paEcho") && SFX_NAMES.includes("crowdCheer"));
 });

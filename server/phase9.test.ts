@@ -70,13 +70,13 @@ test("beat battle: the server grades a run against the difficulty you started, w
   assert.equal(beans("dev-a"), 100 + easy.beans + insane.beans + odd.beans + plain.beans);
 });
 
-test("racer: the server accepts any finishing position in the 20-car field", () => {
+test("racer: the server accepts any finishing position in the 8-car field", () => {
   const { add, up, call, now } = setup();
   add("a", "Ann", "dev-a"); up("a");
   const t = call("a", "racer:start");
   const lap = 30000;
   now.t += RACE.COUNTDOWN_MS + lap * RACE.LAPS;
-  assert.equal(call("a", "racer:finish", { token: t.token, totalMs: lap * RACE.LAPS, bestLapMs: lap, position: 17 }).ok, true);
+  assert.equal(call("a", "racer:finish", { token: t.token, totalMs: lap * RACE.LAPS, bestLapMs: lap, position: 7 }).ok, true);
 });
 
 const poolSetup = () => {
